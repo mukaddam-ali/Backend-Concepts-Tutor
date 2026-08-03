@@ -1,0 +1,245 @@
+# Backend Concepts RAG Tutor
+
+An offline Q&A chatbot that answers questions about core backend engineering
+concepts, using Retrieval-Augmented Generation (RAG) and
+[Microsoft Foundry Local](https://learn.microsoft.com/azure/ai-foundry/foundry-local/what-is-foundry-local)
+for fully on-device LLM inference. No internet connection or cloud account is
+needed at runtime.
+
+**34 topics** across: REST APIs, GraphQL, SQL vs NoSQL, database types
+(document/key-value/graph/column/time-series/search), ORMs & the N+1
+problem, database normalization, CAP theorem, indexing, replication &
+sharding, transactions & ACID, auth, caching, CDNs, message queues, load
+balancing, WebSockets, API design & versioning, rate limiting,
+microservices vs monolith, architectural patterns (12-factor, service
+mesh), observability, containerization, Kubernetes, serverless, CI/CD,
+horizontal vs vertical scaling, CORS, web security fundamentals (OWASP,
+TLS, hashing), testing fundamentals, web servers & reverse proxies,
+resilience patterns (circuit breakers, backpressure), internet
+fundamentals (DNS/HTTP/hosting), version control with Git, and RAG/vectors/
+embeddings. Topic selection is informed by [roadmap.sh/backend](https://roadmap.sh/backend)'s
+structure, and each doc added from that pass links free, verified
+resources for further reading.
+
+See [PROJECT_REPORT.md](PROJECT_REPORT.md) for a presentation-style writeup,
+[TEST_RESULTS.md](TEST_RESULTS.md) for real test transcripts and findings,
+and [PRESENTATION.md](PRESENTATION.md) for a demo script.
+
+## How it works
+
+1. `docs/*.md` — a small knowledge base of backend-concept articles.
+2. `ingest.py` — splits each doc into passage-level chunks, embeds each chunk,
+   and stores `(source, content, embedding)` rows in a local SQLite database
+   (`knowledge.db`).
+3. `retrieval.py` — embeds a user's question and does a brute-force cosine
+   similarity search over the stored embeddings to find the top-K most
+   relevant chunks.
+4. `generate.py` — builds a prompt from the retrieved chunks (instructing the
+   model to answer only from context, cite the source doc, and say "I don't
+   know" if the answer isn't covered) and calls the chat model.
+5. Two interfaces share the same pipeline:
+   - `main.py` — a CLI loop: ask a question, get an answer, repeat.
+   - `app.py` — a Flask API + web chat UI (`static/`), see "Web frontend"
+     below.
+
+Steps 2–4 call through `backend.py`, which picks the actual embedding/chat
+implementation:
+
+- **`foundry_client.py`** (default) — real embeddings and generation via
+  Microsoft Foundry Local, fully on-device.
+- **`demo_backend.py`** (`RAG_BACKEND=demo`) — a pure-Python stand-in with no
+  native dependencies: hashing-based keyword vectors instead of real
+  embeddings, and extractive sentence-picking instead of real generation. See
+  "Demo mode" below.
+
+## Setup
+
+### 1. Install Foundry Local
+
+Foundry Local is a separate runtime from the Python SDK — it must be
+installed on the machine (not just `pip install`-ed):
+
+```bash
+winget install Microsoft.FoundryLocal
+```
+
+**Known issue on this machine:** Foundry Local's native core depends on
+`onnxruntime.dll`, which in turn requires the **Microsoft Visual C++
+2015–2022 Redistributable (x64)**. If `foundry model list` (or running this
+app) fails with `FileNotFoundError: Could not find module '...onnxruntime.dll'
+(or one of its dependencies)`, that redistributable is missing. Install it
+with:
+
+```bash
+winget install Microsoft.VCRedist.2015+.x64
+```
+
+This installer requires **administrator rights** (a UAC prompt). On a machine
+where you don't have admin access, ask whoever administers it to run that one
+command — no other workaround exists, since both the `foundry` CLI daemon and
+the Python SDK's embedded native core link the same DLL.
+
+### 2. Set up the Python environment
+
+```bash
+cd rag-backend-tutor
+python -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+```
+
+### 3. Run
+
+```bash
+.venv\Scripts\python main.py
+```
+
+On first run, it will automatically download the embedding model
+(`qwen3-embedding-0.6b`) and chat model (`phi-3.5-mini`) via Foundry Local
+(requires internet for this one-time download only), ingest `docs/*.md` into
+`knowledge.db`, then start the Q&A loop.
+
+To re-run ingestion manually (e.g. after editing `docs/`):
+
+```bash
+.venv\Scripts\python ingest.py
+```
+
+## Web frontend
+
+A chat-style web UI is available as an alternative to the CLI, sharing the
+exact same `generate.answer_query()` pipeline underneath:
+
+```bash
+.venv\Scripts\python app.py
+```
+
+Then open `http://127.0.0.1:5000`. It's a Flask API (`app.py`) serving a
+static HTML/JS/Tailwind chat UI (`static/`) with a ChatGPT-style layout:
+
+- Left sidebar with a **New Chat** button and a list of past conversations
+  (stored in the browser's `localStorage`, titled after each conversation's
+  first message).
+- Empty-state suggested-question chips (randomized from a pool of topics) to
+  kick off a conversation.
+- ChatGPT-style message layout: user messages as right-aligned bubbles,
+  assistant messages as plain full-width text with an avatar, no bubble.
+- Conversations persist across page reloads and can be deleted individually.
+
+Theme: a shadcn/ui-style palette (neutral grays, burnt-orange `#bf4d00`
+primary/accent, `system-ui` font stack, 10px border radius) matching a
+reference site the user provided, with light/dark variants following the
+OS's `prefers-color-scheme`.
+
+The status pill in the sidebar footer shows which backend is active (Foundry
+Local vs demo) and how many chunks are loaded. `RAG_BACKEND=demo` works the
+same way here as with the CLI. Conversation history is a UI/organizational
+feature only — each question is still answered independently by
+`generate.answer_query()`, with no conversational memory fed back into
+retrieval or the prompt.
+
+API surface, if building against it directly:
+- `GET /api/status` → `{backend, chunk_count}`
+- `POST /api/chat` with `{"message": "..."}` → `{answer, sources}`
+
+## Demo mode (no Foundry Local required)
+
+If Foundry Local isn't runnable yet (e.g. the VC++ Redistributable above
+isn't installed), set `RAG_BACKEND=demo` to exercise the full pipeline with
+`demo_backend.py` instead — real chunking, real SQLite storage, real
+retrieval, just no real embeddings or LLM:
+
+```bash
+# Windows cmd
+set RAG_BACKEND=demo
+.venv\Scripts\python ingest.py
+.venv\Scripts\python main.py
+
+# PowerShell
+$env:RAG_BACKEND = "demo"
+.venv\Scripts\python ingest.py
+.venv\Scripts\python main.py
+
+# bash
+RAG_BACKEND=demo .venv/Scripts/python ingest.py
+RAG_BACKEND=demo .venv/Scripts/python main.py
+```
+
+Demo mode uses an IDF-weighted hashing bag-of-words vector for "embeddings"
+(so retrieval is lexical/keyword overlap, not real semantic similarity) and
+extractive sentence-picking for "generation" (so answers are quoted straight
+from a doc, not composed by a model). It's useful for confirming the
+chunking → storage → retrieval → prompt-assembly pipeline works, but it is
+**not** a substitute for the real models — unset `RAG_BACKEND` (or set it to
+`foundry`) once Foundry Local can actually run.
+
+Note: IDF weighting (down-weighting terms that appear in most docs, e.g.
+"server", "request") was added after testing showed plain term-frequency
+vectors ranked irrelevant chunks above the actually-relevant one once the
+knowledge base grew past ~10 docs. Even with that fix, demo mode occasionally
+pulls in a partially-irrelevant chunk alongside the correct one (it's exact
+keyword matching, not real semantic understanding) — the extractive `chat()`
+step usually still picks the right sentence from whichever retrieved chunk
+is actually relevant, but don't expect this to behave like a real model.
+
+## Project structure
+
+```
+rag-backend-tutor/
+├── docs/                # Knowledge base (markdown source documents)
+├── db.py                # SQLite schema + helpers
+├── backend.py            # Picks foundry_client vs demo_backend (RAG_BACKEND env var)
+├── foundry_client.py    # Real Foundry Local model setup (embedding + chat clients)
+├── demo_backend.py       # Offline stand-in: hashing vectors + extractive "chat"
+├── ingest.py             # Chunk + embed + store pipeline
+├── retrieval.py          # get_top_chunks(query, k) via cosine similarity
+├── generate.py            # answer_query(question) — retrieval + chat call
+├── main.py               # CLI entry point
+├── app.py                # Flask API + web chat UI entry point
+├── static/               # index.html, style.css, script.js (chat frontend)
+├── requirements.txt
+├── requirements-dev.txt  # adds pytest
+├── tests/                # unit tests (all pass without Foundry Local)
+└── knowledge.db          # created on first ingestion run
+```
+
+## Tests
+
+The full pipeline's *logic* is covered by unit tests that don't need Foundry
+Local running — chunking, cosine similarity, the SQLite layer, the demo
+backend's vectors/extraction, and `answer_query`'s source-citation behavior
+(exercised against `demo_backend` so no native dependency is required):
+
+```bash
+.venv\Scripts\pip install -r requirements-dev.txt
+.venv\Scripts\python -m pytest tests/ -v
+```
+
+All 26 tests pass as of this writing (includes `tests/test_app.py` for the
+Flask API). What's *not* covered by automated
+tests — because it requires the real models — is embedding quality and
+generated-answer quality with Foundry Local itself. Verify that manually
+once it's runnable: ask a mix of in-scope and out-of-scope questions through
+`main.py` and confirm retrieval finds the right doc and the fallback message
+appears for out-of-scope ones.
+
+## Design decisions
+
+- **Models**: `qwen3-embedding-0.6b` for embeddings, `phi-3.5-mini` for chat
+  — both small enough to run responsively on a laptop CPU.
+- **Chunking**: paragraphs are grouped two at a time to form passage-level
+  chunks (~1–3 paragraphs), matching what the RAG pattern typically expects.
+- **Retrieval**: brute-force cosine similarity over all stored vectors in
+  Python. Fine at this scale (a few dozen chunks); would need an actual
+  vector index for a much larger document set.
+- **Prompting**: the system prompt instructs the model to answer only from
+  retrieved context, cite the source document, and explicitly say it doesn't
+  know rather than guessing — reducing hallucination.
+
+## Known limitations
+
+- Single-machine, single-user — no concurrency handling.
+- Retrieval is brute-force, not indexed — won't scale past a few hundred
+  chunks without a real vector index.
+- Foundry Local's embedding/generation quality is unverified on this machine
+  pending the VC++ Redistributable install — the demo backend confirms the
+  *pipeline* works, not the real model output.
