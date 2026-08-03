@@ -43,6 +43,15 @@ def chunk_text(text: str, source: str) -> list[str]:
     return chunks
 
 
+# Chunks per embed() call. One API request per document (34+ documents)
+# was enough on its own to trip Gemini's free-tier requests-per-minute
+# quota, especially across repeated redeploys (Render's disk is ephemeral,
+# so every restart re-ingests from scratch). Batching many chunks into a
+# handful of calls cuts the request count drastically; kept comfortably
+# under typical per-call batch-size limits.
+_EMBED_BATCH_SIZE = 90
+
+
 def run_ingestion() -> None:
     db.init_db()
     db.clear_chunks()
@@ -51,19 +60,22 @@ def run_ingestion() -> None:
     if not doc_paths:
         raise RuntimeError(f"No .md files found in {DOCS_DIR}")
 
-    total_chunks = 0
+    sources: list[str] = []
+    all_chunks: list[str] = []
     for doc_path in doc_paths:
         text = doc_path.read_text(encoding="utf-8")
         chunks = chunk_text(text, doc_path.stem)
-        if not chunks:
-            continue
+        sources.extend([doc_path.stem] * len(chunks))
+        all_chunks.extend(chunks)
 
-        embeddings = backend.embed(chunks)
-        for chunk, embedding in zip(chunks, embeddings):
-            db.insert_chunk(source=doc_path.stem, content=chunk, embedding=embedding)
+    total_chunks = 0
+    for start in range(0, len(all_chunks), _EMBED_BATCH_SIZE):
+        batch_chunks = all_chunks[start : start + _EMBED_BATCH_SIZE]
+        batch_sources = sources[start : start + _EMBED_BATCH_SIZE]
+        embeddings = backend.embed(batch_chunks)
+        for source, chunk, embedding in zip(batch_sources, batch_chunks, embeddings):
+            db.insert_chunk(source=source, content=chunk, embedding=embedding)
             total_chunks += 1
-
-        print(f"Ingested {doc_path.name}: {len(chunks)} chunks")
 
     print(f"\nDone. {total_chunks} chunks stored across {len(doc_paths)} documents.")
 
