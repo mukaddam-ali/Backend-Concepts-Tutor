@@ -18,13 +18,66 @@ Gemini as a real hosted-LLM alternative that works in the cloud. Based on
 describes a Foundry Local RAG tutorial project. Lives in the
 `rag-backend-tutor/` folder.
 
-**Live status**: pushed to
+**Live status (as of 2026-08-02)**: pushed to
 [github.com/mukaddam-ali/Backend-Concepts-Tutor](https://github.com/mukaddam-ali/Backend-Concepts-Tutor)
 and deployed on Render (user's own account/dashboard, not something this
-repo can show you directly). The user was in the middle of switching the
-Render deployment's `RAG_BACKEND` env var from `demo` to `gemini` (plus
-adding a `GEMINI_API_KEY`) — check with the user whether that's done and
-whether the live answers look right before assuming it still needs doing.
+repo can show you directly). Currently running `RAG_BACKEND=demo` —
+**deliberately reverted back from `gemini`, not a regression**. Full story:
+
+1. Switching to `gemini` initially crashed the whole site (500 on every
+   route, including static files) because `RAG_BACKEND`'s value in
+   Render's dashboard silently didn't match `"gemini"` at various points
+   (missing `GEMINI_API_KEY`, then the var disappearing from the
+   dashboard entirely at one point, then a stray `render.yaml` Blueprint
+   default of `demo` possibly reconciling it back) — `backend.py`'s
+   `_BACKEND_NAME` comparison now does `.strip().lower()` to guard
+   against invisible whitespace too, but the dashboard var itself is the
+   actual source of truth for this service, not `render.yaml`.
+2. Once that was sorted, hit `google.genai.errors.ClientError: 404` —
+   `gemini-2.5-flash` was deprecated for new users. Fixed by switching
+   `gemini_backend.CHAT_MODEL` to the `"gemini-flash-latest"` alias
+   instead of a pinned version, specifically to avoid this exact class of
+   breakage recurring.
+3. Then hit `429 RESOURCE_EXHAUSTED` on `embed_content` (free tier,
+   `gemini-embedding-001`, limit 100). Root cause was two compounding
+   bugs, both fixed:
+   - `app.py`'s `@app.before_request` hook checked
+     `db.count_chunks() == 0` with **no locking**, so concurrent requests
+     on first page load could each see an empty DB and kick off a full
+     parallel re-ingestion. Fixed with a `threading.Lock` in
+     `ensure_knowledge_base_ready()` (double-checked after acquiring the
+     lock).
+   - `ingest.run_ingestion()` made **one `embed()` call per document**
+     (34+ calls). Refactored to batch all chunks across all docs into
+     calls of `_EMBED_BATCH_SIZE = 90` instead, cutting total requests to
+     a handful.
+   - Neither fix was enough on its own: Render's disk is **ephemeral**,
+     so every restart/redeploy wipes `knowledge.db` and forces a full
+     re-ingestion from scratch. Repeated testing/redeploying in the same
+     session stacked enough embedding calls to exhaust what looks like a
+     very low daily quota for `gemini-embedding-001` on this Google Cloud
+     project's free tier (Google labels the quota "PerMinute" but
+     behavior strongly suggested a longer-lived — likely daily — window;
+     confirmed via the AI Studio Usage page showing only ~70 total
+     requests but still hitting 429 on a fresh restart).
+   - There's also a **latent bug, not yet fixed**: if `run_ingestion()`
+     raises partway through (e.g. a later batch hits a 429), earlier
+     batches already committed to `knowledge.db` stay there, and
+     `count_chunks() > 0` means the `before_request` guard never retries
+     — silently leaving the knowledge base permanently incomplete. This
+     is exactly what caused a real observed symptom: the live gemini
+     deployment answered "I don't have information about that" for
+     "When should I use microservices instead of a monolith?" even
+     though `docs/microservices-vs-monolith.md` exists and clearly
+     covers it — that doc's chunks were likely never embedded because an
+     earlier batch failed first. **Do not re-enable `gemini` mode without
+     either fixing this (e.g. don't commit partial results, or delete
+     `knowledge.db` on any ingestion failure) or verifying a full clean
+     ingestion completed (check `chunk_count` at `/api/status` against
+     an expected total).**
+4. Reverted `RAG_BACKEND` to `demo` (both in the Render dashboard, which
+   is authoritative, and in `render.yaml` as the matching default) so the
+   site is usable again while waiting for the Gemini quota to reset.
 
 ## Already done — do not redo
 
@@ -155,19 +208,27 @@ whether the live answers look right before assuming it still needs doing.
 
 ## What's left — the actual next steps
 
-**Priority 1 — confirm the live Gemini deployment actually gives good
-answers.** As of the last session, the user had just switched (or was
-switching) the live Render deployment to `RAG_BACKEND=gemini` with a real
-`GEMINI_API_KEY`. This was never tested with a real key on the dev
-machine — `tests/test_gemini_backend.py` only verifies request/response
-*parsing* against mocked-but-real SDK types, not actual answer quality from
-a live call. Ask the user: did you check the live site? What did an answer
-actually look like? If something's off (wrong model name rejected by the
-API, a parsing mismatch, a rate-limit error), the likely culprits are in
-`gemini_backend.py` — see the API-verification notes above before changing
-anything, and re-verify against `inspect.signature()` on the installed
-`google-genai` package rather than trusting web docs (they were wrong once
-already).
+**Priority 1 — re-enable Gemini mode once its free-tier quota resets, the
+right way this time.** Full history of what was already tried and fixed is
+in the "Live status" section above — read it before touching this. Do NOT
+just flip `RAG_BACKEND` back to `gemini` and walk away; the concurrency and
+batching bugs are fixed, but the ephemeral-disk-forces-re-embedding-every-
+restart problem is structural, not just a one-off quota blip, and will
+recur on every redeploy/spin-down-then-wake unless addressed. The actual
+fix: once a clean full ingestion succeeds (verify via `/api/status`'s
+`chunk_count` — should match the total chunk count across all `docs/*.md`
+files, not a partial number), copy the resulting `knowledge.db` out of the
+Render instance (or run ingestion somewhere you can pull the file from) and
+commit it into the git repo. Then `before_request`'s existing
+`count_chunks() > 0` check will skip ingestion entirely on every future
+restart, since the pre-built DB ships with the deployed code — only live
+per-question `embed_one()` calls happen at runtime after that, which is a
+trivial, sustainable request volume. Also worth fixing before re-attempting:
+`ingest.run_ingestion()` doesn't roll back partial results if a later batch
+fails, so a repeat of the quota error could again leave a silently
+incomplete knowledge base (this already happened once — see point 3 in the
+"Live status" section for the observed symptom and a concrete before/after
+check to catch it next time).
 
 **Priority 2 (lower — a "nice to have," not blocking) — verify the real
 Foundry Local models actually work locally.** This has never been done —
