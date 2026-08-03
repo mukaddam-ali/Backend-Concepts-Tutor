@@ -18,7 +18,36 @@ Gemini as a real hosted-LLM alternative that works in the cloud. Based on
 describes a Foundry Local RAG tutorial project. Lives in the
 `rag-backend-tutor/` folder.
 
-**Live status (as of 2026-08-02)**: pushed to
+## ⚠️ Constraint that changed everything (2026-08-03): must run fully offline, no cloud LLM at all
+
+The professor requires this project to run **fully offline with a real
+on-device LLM** — not just "no explicit API key," but no calls to Gemini,
+ChatGPT, or any cloud model at all — and to answer *only* from a fixed,
+bounded set of local files (our 34 `docs/*.md` files satisfy "read from a
+bounded set of ~20+ files and answer only from those" — no content swap
+needed, just confirm retrieval never leaves `docs/`, which it doesn't).
+
+**This makes `gemini_backend.py` and the whole Render/Gemini saga below
+(section "Live status as of 2026-08-02") no longer the priority** — it's
+kept as history because the bugs fixed there (batching, ingestion
+atomicity, the `.strip().lower()` fix) are real and still apply to
+`ingest.py`/`app.py`/`backend.py` regardless of which backend is active.
+But the assistant now needs to actually run on **Foundry Local**
+(`RAG_BACKEND` unset/anything other than `demo`/`gemini`), not Gemini.
+**Foundry Local cannot run on Render** (it's an on-device runtime, not an
+HTTPS API — confirmed, see "Render deployment" section below) — if the
+professor needs to see it live rather than in a local demo, that's an
+open question to raise with them, not something to solve in code.
+
+**Status as of 2026-08-03: Foundry Local is now confirmed working
+end-to-end on this machine** (a different, admin-rights machine than the
+one the demo/Gemini backends were built on). Full story in "Already done"
+below under "Real Foundry Local pipeline verified end-to-end" — read it
+before touching `foundry_client.py` or `ingest.py`'s batch size again.
+
+## Live status as of 2026-08-02 (Render/Gemini — now secondary, kept for history)
+
+Pushed to
 [github.com/mukaddam-ali/Backend-Concepts-Tutor](https://github.com/mukaddam-ali/Backend-Concepts-Tutor)
 and deployed on Render (user's own account/dashboard, not something this
 repo can show you directly). Currently running `RAG_BACKEND=demo` —
@@ -208,109 +237,134 @@ repo can show you directly). Currently running `RAG_BACKEND=demo` —
 
 ## What's left — the actual next steps
 
-**Priority 1 — re-enable Gemini mode once its free-tier quota resets, the
-right way this time.** Full history of what was already tried and fixed is
-in the "Live status" section above — read it before touching this. Do NOT
-just flip `RAG_BACKEND` back to `gemini` and walk away; the concurrency and
-batching bugs are fixed, but the ephemeral-disk-forces-re-embedding-every-
-restart problem is structural, not just a one-off quota blip, and will
-recur on every redeploy/spin-down-then-wake unless addressed. The actual
-fix: once a clean full ingestion succeeds (verify via `/api/status`'s
-`chunk_count` — should match the total chunk count across all `docs/*.md`
-files, not a partial number), copy the resulting `knowledge.db` out of the
-Render instance (or run ingestion somewhere you can pull the file from) and
-commit it into the git repo. Then `before_request`'s existing
-`count_chunks() > 0` check will skip ingestion entirely on every future
-restart, since the pre-built DB ships with the deployed code — only live
-per-question `embed_one()` calls happen at runtime after that, which is a
-trivial, sustainable request volume. Also worth fixing before re-attempting:
-`ingest.run_ingestion()` doesn't roll back partial results if a later batch
-fails, so a repeat of the quota error could again leave a silently
-incomplete knowledge base (this already happened once — see point 3 in the
-"Live status" section for the observed symptom and a concrete before/after
-check to catch it next time).
+**Priority 1 — decide if `qwen2.5-0.5b`'s answer quality is good enough, or
+try a slightly bigger model.** Foundry Local works end-to-end now (see
+"Already done" below), but the chat model was picked purely to dodge an
+internal timeout, not for quality — it's a 0.5B-parameter model and it
+shows (verbose, sometimes-inaccurate paraphrasing; e.g. it described vector
+search as a "knowledge graph" once, which isn't right). Options, in order
+of effort:
+- Ask the user if the current quality is acceptable for the assignment —
+  it does correctly cite the right source doc and gives a real generated
+  multi-paragraph answer, which may be all that's actually required.
+- Try `qwen3-1.7b` or `qwen2.5-1.5b` (still much smaller than `phi-3.5-mini`)
+  and re-measure timing the same way this session did: warm the chat client
+  once via `foundry_client.get_chat_client()`, then time a real
+  `generate.answer_query(...)` call. If it finishes without
+  `FoundryLocalException: ... Operation was cancelled` in well under a
+  minute, it's a viable upgrade.
+- If quality still isn't good enough even at the largest model that avoids
+  the timeout, the next lever is `generate.py`'s `SYSTEM_PROMPT` — it
+  currently asks for "thorough, multi-paragraph, example-driven answers,"
+  which costs generation time on a slow model; asking for something shorter
+  buys headroom to use a bigger/smarter model instead.
 
-**Priority 2 (lower — a "nice to have," not blocking) — verify the real
-Foundry Local models actually work locally.** This has never been done —
-everything Foundry-Local-related was validated via the demo stand-in
-because of a blocker on the original dev machine. Since Gemini now covers
-the "I want real generated answers" need (and works on Render, unlike
-Foundry Local), this is optional polish for the CLI's fully-offline story,
-not urgent.
+**Priority 2 — run the real pipeline through `app.py` (the web UI) and
+`main.py` (the CLI), not just raw `generate.answer_query()` calls in a
+Python shell.** Only the underlying function has been exercised so far.
+Confirm the Flask app's `ensure_knowledge_base_ready()` before_request hook
+correctly triggers ingestion (or finds the existing `knowledge.db` on disk
+skip case) with the local venv, and that a real browser session against
+`http://127.0.0.1:5000` works end-to-end, including the ~40s/answer latency
+being tolerable in the actual UI (loading state, no timeout on the Flask/
+frontend side cutting the request short before Foundry Local responds).
 
-### The blocker (on the original machine, may not apply here)
+**Priority 3 — re-run the test suite from `TEST_RESULTS.md` against the
+real model.** It has 23 test questions (20 in-scope, 3 out-of-scope) that
+were run against the demo backend, including 2 documented false positives
+specific to the demo backend's crude keyword matching. Re-run the same 23
+against the real Foundry Local pipeline and update `TEST_RESULTS.md` — the
+2 known-failing out-of-scope questions are the most important to re-check,
+since a real LLM should handle "I don't know" cases correctly where
+keyword matching couldn't.
 
-Foundry Local's native core (`onnxruntime.dll`) requires the **Microsoft
-Visual C++ 2015–2022 Redistributable (x64)**, whose installer needs
-administrator rights. The original machine wasn't the user's own PC and had
-no admin access, so this was never installed. Confirmed via a full Python
-traceback ending in `FileNotFoundError: Could not find module
-'...onnxruntime.dll' (or one of its dependencies)`. If you have admin rights
-on this new machine, this should be a non-issue — just run the setup steps
-below.
+**Priority 4 (raise with the user, not something to decide unilaterally) —
+what happens to the Render deployment?** Foundry Local cannot run there
+(Windows-only native runtime, confirmed, see the Render section below), so
+if the professor's offline requirement really does rule out any cloud LLM,
+the Render/Gemini deployment may no longer be part of what gets submitted/
+graded — or the user may want it kept as a separate "cloud demo" alongside
+a local "offline demo," with both explained. Don't silently decide either
+way; ask.
 
-### Setup steps on the new machine
+### Foundry Local setup — already done on this machine, keep for reference
 
-1. **Do not reuse the `.venv` folder if it was copied over** — Python
-   virtualenvs embed absolute paths and won't work on a different machine
-   path. Delete `.venv/` and recreate it:
+If a future session runs on yet another new machine, repeat this:
+
+1. Recreate `.venv` (don't reuse a copied one — embeds absolute paths):
    ```bash
-   cd rag-backend-tutor
    python -m venv .venv
    .venv\Scripts\pip install -r requirements-dev.txt
    ```
-2. **Install Foundry Local** (if not already installed on this machine):
+   Note: plain `python`/`py` may not exist even after this if only the
+   Windows Store execution-alias stub is present (confirmed on this
+   machine — it printed "Python was not found; run without arguments to
+   install from the Microsoft Store" despite `python` resolving to a
+   *real* path). Install a real interpreter first if so:
+   ```bash
+   winget install Python.Python.3.12
+   ```
+   then use the full path, e.g.
+   `C:\Users\<user>\AppData\Local\Programs\Python\Python312\python.exe`.
+2. Install Foundry Local:
    ```bash
    winget install Microsoft.FoundryLocal
    ```
-3. **Install the VC++ Redistributable** (this is the step that was blocked
-   before — should work fine with admin rights):
-   ```bash
-   winget install Microsoft.VCRedist.2015+.x64
-   ```
-   Approve the UAC prompt.
-4. **Sanity-check Foundry Local works** before touching this project's code:
-   ```bash
-   foundry model list
-   ```
-   If this runs without a DLL error, the blocker is cleared.
-5. **Run the real pipeline** (note: no `RAG_BACKEND=demo` — that flag forces
-   the offline stand-in; omit it to use real Foundry Local). Either the CLI:
+   (On this machine the VC++ Redistributable dependency was already
+   satisfied automatically — the admin-rights blocker documented on the
+   *original* dev machine did not recur here. If it does recur elsewhere:
+   `winget install Microsoft.VCRedist.2015+.x64`, approve the UAC prompt.)
+3. Sanity check: `foundry model list` should print a model table with no
+   DLL error.
+4. Run the real pipeline (no `RAG_BACKEND` set — that's what selects
+   Foundry Local by default):
    ```bash
    .venv\Scripts\python.exe ingest.py
    .venv\Scripts\python.exe main.py
    ```
-   or the web chat UI:
-   ```bash
-   .venv\Scripts\python.exe app.py
-   ```
-   then open `http://127.0.0.1:5000`. Both call the same
-   `generate.answer_query()` — no separate ingestion step needed for the web
-   UI, it ingests automatically on first request if the DB is empty.
+   or `app.py` for the web UI. First run downloads
+   `qwen3-embedding-0.6b` and the configured chat model alias — needs
+   internet for that one-time download only.
 
-   First run downloads two models automatically (`qwen3-embedding-0.6b`,
-   `phi-3.5-mini`) — needs internet for that one-time download only.
+### Real Foundry Local pipeline verified end-to-end (2026-08-03) — read before touching `foundry_client.py` or `ingest.py`'s batch size
 
-### Once it's running, re-run the test suite
+This had never actually been run before this session — everything
+Foundry-Local-related was previously validated only via the demo stand-in,
+because of an admin-rights blocker on the *original* dev machine (see
+above; did not recur on this machine). Two real bugs were found and fixed
+getting a genuine end-to-end answer, both specific to **local CPU
+inference**, distinct from the Gemini rate-limit issues above:
 
-`TEST_RESULTS.md` has 23 test questions (20 in-scope, 3 out-of-scope) that
-were run against the demo backend, including 2 documented false positives
-that are specific to the demo backend's crude keyword matching. Re-run the
-same 23 questions against the real model and update `TEST_RESULTS.md` with
-real results — the 2 known-failing out-of-scope questions are the most
-important ones to re-check, since a real LLM should handle them correctly
-where keyword matching couldn't.
+- `ingest.py`'s `_EMBED_BATCH_SIZE` was `90` (sized to cut down Gemini API
+  call *count* against a cloud rate limit). Against local Foundry Local
+  CPU inference this reliably raised
+  `foundry_local_sdk.exception.FoundryLocalException: ... Operation was
+  cancelled` — an internal timeout, not something configurable via the SDK
+  (checked `ChatClientSettings`, `Configuration`, `core_interop.py`; no
+  exposed timeout parameter). Measured: 30 texts alone took over a minute.
+  **Lowered to `20`.** If you crank this back up for any reason, re-verify
+  it doesn't reintroduce the cancellation on whatever hardware you're on.
+- `foundry_client.CHAT_MODEL_ALIAS` was `"phi-3.5-mini"`. On this machine's
+  CPU, a **one-word** completion took ~55 seconds, and the full RAG prompt
+  (retrieved context + the multi-paragraph answer `SYSTEM_PROMPT` asks for)
+  consistently hit the same "Operation was cancelled" timeout before
+  finishing. **Swapped to `"qwen2.5-0.5b"`**, which completes the same full
+  RAG prompt in single digits to ~40s and does not hit the timeout. This is
+  a real speed/quality tradeoff, not a free win — see Priority 1 above.
 
-```python
-import generate
-result = generate.answer_query("What is the capital of France?")
-print(result["answer"], result["sources"])
-```
+Verified via an actual `ingest.py` run (`219 chunks stored across 34
+documents`, all genuine `qwen3-embedding-0.6b` embeddings, no shortcuts)
+and a real `generate.answer_query("How does RAG (Retrieval-Augmented
+Generation) work?")` call, which returned a real generated multi-paragraph
+answer correctly sourced from `rag-vectors-embeddings` — confirming
+retrieval, generation, and source-citation all work with zero network
+calls at inference time.
 
 ### After that, optional stretch goals (not started, not required)
 
 - A Streamlit/Gradio or HTML+JS UI instead of CLI (mentioned as an option
-  in the original project guide).
+  in the original project guide) — likely moot now, the Flask+static-HTML
+  web UI already exists and satisfies this.
 - Tune chunk size (`ingest.chunk_text`) or top-K (`retrieval.get_top_chunks`'s
   `k` parameter) if real-model answer quality suggests it.
 
