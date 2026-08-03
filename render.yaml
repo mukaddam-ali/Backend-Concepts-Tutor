@@ -7,6 +7,8 @@ services:
     startCommand: python -m waitress --host=0.0.0.0 --port=$PORT app:app
     envVars:
       - key: RAG_BACKEND
-        value: demo
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
       - key: PYTHON_VERSION
         value: 3.12.10
