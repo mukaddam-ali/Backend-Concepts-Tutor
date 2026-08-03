@@ -9,22 +9,32 @@ unless you find evidence otherwise. Your job is to pick up at "What's left."
 
 ## Project in one paragraph
 
-An offline Q&A chatbot that answers questions about backend engineering
-concepts (REST, GraphQL, databases, caching, auth, etc.) using RAG
-(Retrieval-Augmented Generation) with Microsoft Foundry Local for on-device
-LLM inference — no cloud, no internet needed at runtime. Based on
+A Q&A chatbot that answers questions about backend engineering concepts
+(REST, GraphQL, databases, caching, auth, etc.) using RAG
+(Retrieval-Augmented Generation). Originally built around Microsoft Foundry
+Local for fully offline, on-device inference; now also supports Google
+Gemini as a real hosted-LLM alternative that works in the cloud. Based on
 `project guide.docx` (one directory up, if it was transferred) which
 describes a Foundry Local RAG tutorial project. Lives in the
 `rag-backend-tutor/` folder.
+
+**Live status**: pushed to
+[github.com/mukaddam-ali/Backend-Concepts-Tutor](https://github.com/mukaddam-ali/Backend-Concepts-Tutor)
+and deployed on Render (user's own account/dashboard, not something this
+repo can show you directly). The user was in the middle of switching the
+Render deployment's `RAG_BACKEND` env var from `demo` to `gemini` (plus
+adding a `GEMINI_API_KEY`) — check with the user whether that's done and
+whether the live answers look right before assuming it still needs doing.
 
 ## Already done — do not redo
 
 - **Full pipeline built and working**: `db.py` (SQLite), `ingest.py`
   (chunking + embedding), `retrieval.py` (cosine similarity search),
   `generate.py` (prompt assembly + answer), `main.py` (CLI), `backend.py`
-  (dispatches between real Foundry Local and an offline demo stand-in),
-  `foundry_client.py` (real Foundry Local integration, written against the
-  actual installed SDK's API — inspected directly, not guessed).
+  (dispatches between three implementations based on `RAG_BACKEND`:
+  `foundry_client.py` real on-device Foundry Local, `gemini_backend.py`
+  real hosted Google Gemini, `demo_backend.py` offline keyword-matching
+  stand-in — see `backend.py`'s own docstring for the env var values).
 - **34-topic knowledge base** in `docs/*.md`. Original 20: REST APIs,
   GraphQL, SQL vs NoSQL, auth, caching, CDNs, message queues, load
   balancing, WebSockets, API versioning, rate limiting, transactions/ACID,
@@ -67,7 +77,7 @@ describes a Foundry Local RAG tutorial project. Lives in the
 - **Web chat frontend** (`app.py` + `static/index.html`, `style.css`,
   `script.js`): a Flask API wrapping the exact same `generate.answer_query()`
   the CLI uses. `GET /api/status` and `POST /api/chat` are the two
-  endpoints. Covered by `tests/test_app.py` (5 tests, included in the 26
+  endpoints. Covered by `tests/test_app.py` (5 tests, included in the 30
   total). The CLI (`main.py`) was kept as-is per explicit instruction — both
   interfaces coexist, don't remove either.
 - **Frontend design, v2 (current)**: a ChatGPT-style layout — left sidebar
@@ -143,11 +153,29 @@ describes a Foundry Local RAG tutorial project. Lives in the
   quality/behavior, which needs a real `GEMINI_API_KEY` the dev machine
   doesn't have.
 
-## What's left — the actual next step
+## What's left — the actual next steps
 
-**Verify the real Foundry Local models actually work.** This has never been
-done — everything above was validated via the demo stand-in because of a
-blocker on the original machine. This is the one meaningful thing left.
+**Priority 1 — confirm the live Gemini deployment actually gives good
+answers.** As of the last session, the user had just switched (or was
+switching) the live Render deployment to `RAG_BACKEND=gemini` with a real
+`GEMINI_API_KEY`. This was never tested with a real key on the dev
+machine — `tests/test_gemini_backend.py` only verifies request/response
+*parsing* against mocked-but-real SDK types, not actual answer quality from
+a live call. Ask the user: did you check the live site? What did an answer
+actually look like? If something's off (wrong model name rejected by the
+API, a parsing mismatch, a rate-limit error), the likely culprits are in
+`gemini_backend.py` — see the API-verification notes above before changing
+anything, and re-verify against `inspect.signature()` on the installed
+`google-genai` package rather than trusting web docs (they were wrong once
+already).
+
+**Priority 2 (lower — a "nice to have," not blocking) — verify the real
+Foundry Local models actually work locally.** This has never been done —
+everything Foundry-Local-related was validated via the demo stand-in
+because of a blocker on the original dev machine. Since Gemini now covers
+the "I want real generated answers" need (and works on Render, unlike
+Foundry Local), this is optional polish for the CLI's fully-offline story,
+not urgent.
 
 ### The blocker (on the original machine, may not apply here)
 
