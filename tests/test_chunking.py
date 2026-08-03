@@ -22,3 +22,15 @@ def test_chunk_text_ignores_blank_paragraphs():
 def test_chunk_text_empty_input_returns_no_chunks():
     assert chunk_text("", source="doc") == []
     assert chunk_text("   \n\n  ", source="doc") == []
+
+
+def test_chunk_text_excludes_free_resources_section():
+    text = (
+        "Para one.\n\nPara two.\n\n"
+        "## Free resources\n\n"
+        "- [Kubernetes docs](https://kubernetes.io/docs/)\n"
+        "- [Kubernetes tutorial](https://kubernetes.io/docs/tutorials/)\n"
+    )
+    chunks = chunk_text(text, source="doc")
+    assert chunks == ["Para one.\n\nPara two."]
+    assert not any("Free resources" in c or "kubernetes.io" in c for c in chunks)

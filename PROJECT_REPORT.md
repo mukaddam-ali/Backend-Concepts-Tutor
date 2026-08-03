@@ -86,7 +86,7 @@ correctly triggered the "I don't know" fallback, and 2 produced false-
 positive answers due to a limitation specific to the demo backend's
 keyword-matching approach (see TEST_RESULTS.md for the detailed root-cause
 analysis; the 20-topic KB has since grown to 34, see Knowledge base above).
-Separately, 26 automated unit tests cover chunking, cosine similarity, the
+Separately, 27 automated unit tests cover chunking, cosine similarity, the
 SQLite layer, the demo backend, source-citation logic, and the Flask API
 (`pytest tests/ -v`).
 

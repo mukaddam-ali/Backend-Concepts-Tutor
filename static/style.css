@@ -60,6 +60,14 @@ body {
   color: var(--foreground);
 }
 
+/* `h-screen` (100vh) gets cut off behind mobile browser toolbars that show/hide
+   as the page scrolls. `100dvh` tracks the actual visible viewport instead. */
+@supports (height: 100dvh) {
+  body.h-screen {
+    height: 100dvh;
+  }
+}
+
 textarea {
   field-sizing: content;
   max-height: 160px;

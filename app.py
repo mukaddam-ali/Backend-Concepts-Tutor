@@ -4,6 +4,8 @@ Wraps the same generate.answer_query() used by the CLI (main.py) — both
 interfaces share the exact same retrieval/generation pipeline.
 """
 
+import os
+
 from flask import Flask, jsonify, request, send_from_directory
 
 import backend
@@ -19,6 +21,14 @@ def ensure_knowledge_base_ready() -> None:
     if db.count_chunks() == 0:
         print("Knowledge base is empty. Running ingestion...")
         ingest.run_ingestion()
+
+
+@app.before_request
+def _ensure_knowledge_base_before_request():
+    # Runs under any WSGI server (waitress, gunicorn), not just `python app.py` --
+    # a plain `if __name__ == "__main__"` check never fires when a production
+    # server imports this module and calls the `app` object directly.
+    ensure_knowledge_base_ready()
 
 
 @app.get("/")
@@ -49,5 +59,5 @@ def chat():
 
 
 if __name__ == "__main__":
-    ensure_knowledge_base_ready()
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=True, host="0.0.0.0", port=port)

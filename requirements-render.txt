@@ -1,0 +1,10 @@
+# Requirements for deploying the demo-mode web app to Render (or any Linux
+# host). Deliberately excludes foundry-local-sdk: it ships Windows-only
+# (win_amd64) wheels and cannot be installed on Linux at all. This is fine --
+# backend.py only imports foundry_client when RAG_BACKEND is not "demo", so
+# as long as RAG_BACKEND=demo is set in the deployment's environment
+# variables, foundry_client (and foundry-local-sdk) is never imported.
+# See HANDOFF.md / README.md for why Foundry Local itself can't run on a
+# cloud host regardless (it's an on-device inference runtime, not a service).
+flask
+waitress

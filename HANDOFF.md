@@ -47,7 +47,7 @@ describes a Foundry Local RAG tutorial project. Lives in the
   path). Don't add a "Free resources" link without verifying it the same
   way — MDN and several other doc sites restructure URLs often enough that
   "this is a well-known site" is not sufficient confidence on its own.
-- **26 automated unit tests**, all passing (`pytest tests/ -v`) — cover
+- **27 automated unit tests**, all passing (`pytest tests/ -v`) — cover
   chunking, cosine similarity, the SQLite layer, the demo backend, and
   source-citation logic. These don't need Foundry Local to run.
 - **Offline demo backend** (`demo_backend.py`, activated via
@@ -86,6 +86,37 @@ describes a Foundry Local RAG tutorial project. Lives in the
   mobile-toggle/overlay behavior. Conversation history is UI-only — no
   conversational memory is fed back into retrieval or prompts; each question
   is still answered independently.
+- **Production-readiness pass** (mobile, icons, deployment). Found and fixed
+  a real bug: `ensure_knowledge_base_ready()` was only called inside
+  `if __name__ == "__main__"`, which a production WSGI server never
+  executes (it imports the `app` object directly) — on a real deployment
+  the DB would have silently stayed empty forever. Fixed via a
+  `@app.before_request` hook in `app.py`; verified by actually running the
+  app through `waitress` (not just `python app.py`) and hitting
+  `/api/chat` for real. Mobile responsiveness was checked directly (resize
+  to 375/768px, inspect computed styles) rather than assumed — the
+  sidebar breakpoint logic was already correct; added a `100dvh` fix for
+  the classic mobile-toolbar viewport-height issue. Added a themed favicon
+  (`static/favicon.svg` + generated PNG variants, same glyph as the header
+  logo/avatar). Found and fixed a second real bug while testing Render
+  deployability: the new docs' "Free resources" sections repeated the
+  topic name in link titles often enough to outrank the actual explanation
+  in demo-mode retrieval (caught via `generate.answer_query("What is
+  Kubernetes used for?")` returning a link list instead of an
+  explanation) — fixed by stripping that section before chunking
+  (`ingest.strip_free_resources`), with a regression test.
+- **Render deployment is set up and verified installable**, not just
+  documented on faith: `requirements-render.txt` (flask + waitress only —
+  `foundry-local-sdk` ships **Windows-only wheels** and cannot install on
+  Linux at all, confirmed), `render.yaml` (Blueprint config,
+  `RAG_BACKEND=demo` set there), `RENDER_DEPLOY.md` (guide). Actually
+  built a fresh venv with only `requirements-render.txt`, ran the app
+  under `waitress` in it, and hit real HTTP endpoints successfully before
+  writing any of this up. Gunicorn was considered and rejected — it can't
+  run natively on Windows (needs `fork()`), so it couldn't be tested on
+  this dev machine; waitress is cross-platform and was actually verified.
+  A cloud deployment can only ever run demo mode — Foundry Local has no
+  Linux/hosted form, this is structural, not a config problem to solve.
 
 ## What's left — the actual next step
 

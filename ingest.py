@@ -8,9 +8,26 @@ import db
 
 DOCS_DIR = Path(__file__).parent / "docs"
 
+# Matches from a "## Free resources" heading to the end of the doc.
+_FREE_RESOURCES_RE = re.compile(r"\n##\s*Free resources.*\Z", re.S | re.I)
+
+
+def strip_free_resources(text: str) -> str:
+    """Remove the "Free resources" section before chunking.
+
+    Link titles there repeat the topic name (e.g. "Kubernetes documentation"),
+    which gave those chunks an inflated keyword-overlap score in the demo
+    backend's retrieval -- confirmed by testing, where "What is Kubernetes
+    used for?" retrieved the resources list instead of the actual
+    explanation. The section stays in the doc file for humans reading it
+    directly; it's just excluded from what the assistant can retrieve.
+    """
+    return _FREE_RESOURCES_RE.sub("", text)
+
 
 def chunk_text(text: str, source: str) -> list[str]:
     """Split a markdown doc into passage-level chunks (~1-3 paragraphs each)."""
+    text = strip_free_resources(text)
     paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
 
     chunks = []

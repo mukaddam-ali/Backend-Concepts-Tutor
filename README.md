@@ -141,6 +141,23 @@ API surface, if building against it directly:
 - `GET /api/status` → `{backend, chunk_count}`
 - `POST /api/chat` with `{"message": "..."}` → `{answer, sources}`
 
+The UI is responsive (mobile/tablet/desktop breakpoints, a collapsible
+sidebar with a mobile overlay/hamburger toggle) and uses `100dvh` rather
+than `100vh` so content isn't cut off behind mobile browser toolbars. A
+themed favicon (`static/favicon.svg` + PNG variants) reuses the same
+circle-and-cross glyph as the header logo and chat avatar.
+
+On Windows, `run.bat` / `run_demo.bat` do the same thing as the commands
+above without needing to remember `cmd` vs PowerShell environment-variable
+syntax.
+
+## Deploying
+
+`run.bat`/`app.py` are for local use. To put this online, see
+[RENDER_DEPLOY.md](RENDER_DEPLOY.md) — note that a cloud deployment can
+only run in demo mode (`RAG_BACKEND=demo`), since Foundry Local is an
+on-device runtime with no Linux build reachable from a host like Render.
+
 ## Demo mode (no Foundry Local required)
 
 If Foundry Local isn't runnable yet (e.g. the VC++ Redistributable above
@@ -195,9 +212,13 @@ rag-backend-tutor/
 ├── generate.py            # answer_query(question) — retrieval + chat call
 ├── main.py               # CLI entry point
 ├── app.py                # Flask API + web chat UI entry point
-├── static/               # index.html, style.css, script.js (chat frontend)
-├── requirements.txt
+├── static/               # index.html, style.css, script.js, favicon assets
+├── run.bat, run_demo.bat # Windows one-liners for `python app.py` (with/without demo mode)
+├── requirements.txt      # Full deps (includes Windows-only foundry-local-sdk)
+├── requirements-render.txt  # Lean deps for cloud/Linux deployment (no Foundry SDK)
 ├── requirements-dev.txt  # adds pytest
+├── render.yaml           # Render Blueprint config
+├── RENDER_DEPLOY.md      # Deployment guide
 ├── tests/                # unit tests (all pass without Foundry Local)
 └── knowledge.db          # created on first ingestion run
 ```
@@ -214,7 +235,7 @@ backend's vectors/extraction, and `answer_query`'s source-citation behavior
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-All 26 tests pass as of this writing (includes `tests/test_app.py` for the
+All 27 tests pass as of this writing (includes `tests/test_app.py` for the
 Flask API). What's *not* covered by automated
 tests — because it requires the real models — is embedding quality and
 generated-answer quality with Foundry Local itself. Verify that manually
