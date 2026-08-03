@@ -54,7 +54,6 @@ _EMBED_BATCH_SIZE = 90
 
 def run_ingestion() -> None:
     db.init_db()
-    db.clear_chunks()
 
     doc_paths = sorted(DOCS_DIR.glob("*.md"))
     if not doc_paths:
@@ -68,16 +67,22 @@ def run_ingestion() -> None:
         sources.extend([doc_path.stem] * len(chunks))
         all_chunks.extend(chunks)
 
-    total_chunks = 0
+    # Embed everything before touching the DB at all. If a later batch fails
+    # (e.g. a rate limit), nothing has been written yet -- the existing
+    # knowledge base (if any) stays intact instead of being wiped and left
+    # half-populated, which previously caused count_chunks() > 0 to silently
+    # skip retrying ingestion on a knowledge base missing whichever docs came
+    # after the failed batch.
+    all_embeddings: list[list[float]] = []
     for start in range(0, len(all_chunks), _EMBED_BATCH_SIZE):
         batch_chunks = all_chunks[start : start + _EMBED_BATCH_SIZE]
-        batch_sources = sources[start : start + _EMBED_BATCH_SIZE]
-        embeddings = backend.embed(batch_chunks)
-        for source, chunk, embedding in zip(batch_sources, batch_chunks, embeddings):
-            db.insert_chunk(source=source, content=chunk, embedding=embedding)
-            total_chunks += 1
+        all_embeddings.extend(backend.embed(batch_chunks))
 
-    print(f"\nDone. {total_chunks} chunks stored across {len(doc_paths)} documents.")
+    db.clear_chunks()
+    for source, chunk, embedding in zip(sources, all_chunks, all_embeddings):
+        db.insert_chunk(source=source, content=chunk, embedding=embedding)
+
+    print(f"\nDone. {len(all_chunks)} chunks stored across {len(doc_paths)} documents.")
 
 
 if __name__ == "__main__":
