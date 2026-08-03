@@ -47,9 +47,13 @@ def chunk_text(text: str, source: str) -> list[str]:
 # was enough on its own to trip Gemini's free-tier requests-per-minute
 # quota, especially across repeated redeploys (Render's disk is ephemeral,
 # so every restart re-ingests from scratch). Batching many chunks into a
-# handful of calls cuts the request count drastically; kept comfortably
-# under typical per-call batch-size limits.
-_EMBED_BATCH_SIZE = 90
+# handful of calls cuts the request count drastically. Kept at 20 rather
+# than higher -- a batch of 90 against local Foundry Local's CPU inference
+# reliably hit "Operation was cancelled" (an internal request timeout);
+# 30 texts alone took over a minute, so 90 would exceed it. 20 stays
+# comfortably under that on this hardware while still batching Gemini
+# calls enough to matter.
+_EMBED_BATCH_SIZE = 20
 
 
 def run_ingestion() -> None:

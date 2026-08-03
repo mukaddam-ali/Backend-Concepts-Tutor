@@ -3,7 +3,12 @@
 from foundry_local_sdk import Configuration, FoundryLocalManager
 
 EMBEDDING_MODEL_ALIAS = "qwen3-embedding-0.6b"
-CHAT_MODEL_ALIAS = "phi-3.5-mini"
+# phi-3.5-mini was swapped out: on this machine's CPU-only inference it took
+# ~55s for even a one-word completion, and the full RAG prompt (retrieved
+# context + a multi-paragraph answer) reliably hit an internal
+# "Operation was cancelled" timeout before finishing. qwen2.5-0.5b answers
+# the same prompts in ~3-10s, comfortably under that limit.
+CHAT_MODEL_ALIAS = "qwen2.5-0.5b"
 
 _manager = None
 
