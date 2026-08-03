@@ -5,6 +5,7 @@ interfaces share the exact same retrieval/generation pipeline.
 """
 
 import os
+import threading
 
 from flask import Flask, jsonify, request, send_from_directory
 
@@ -15,12 +16,20 @@ import ingest
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
+_ingestion_lock = threading.Lock()
+
 
 def ensure_knowledge_base_ready() -> None:
     db.init_db()
-    if db.count_chunks() == 0:
-        print("Knowledge base is empty. Running ingestion...")
-        ingest.run_ingestion()
+    if db.count_chunks() > 0:
+        return
+    with _ingestion_lock:
+        # Re-check after acquiring the lock -- another thread may have
+        # finished ingestion while this one was waiting, and re-running it
+        # would re-embed everything and burn through the API rate limit.
+        if db.count_chunks() == 0:
+            print("Knowledge base is empty. Running ingestion...")
+            ingest.run_ingestion()
 
 
 @app.before_request
