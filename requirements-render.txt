@@ -8,3 +8,4 @@
 # cloud host regardless (it's an on-device inference runtime, not a service).
 flask
 waitress
+google-genai

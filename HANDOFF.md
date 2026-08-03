@@ -47,7 +47,7 @@ describes a Foundry Local RAG tutorial project. Lives in the
   path). Don't add a "Free resources" link without verifying it the same
   way — MDN and several other doc sites restructure URLs often enough that
   "this is a well-known site" is not sufficient confidence on its own.
-- **27 automated unit tests**, all passing (`pytest tests/ -v`) — cover
+- **30 automated unit tests**, all passing (`pytest tests/ -v`) — cover
   chunking, cosine similarity, the SQLite layer, the demo backend, and
   source-citation logic. These don't need Foundry Local to run.
 - **Offline demo backend** (`demo_backend.py`, activated via
@@ -115,8 +115,33 @@ describes a Foundry Local RAG tutorial project. Lives in the
   writing any of this up. Gunicorn was considered and rejected — it can't
   run natively on Windows (needs `fork()`), so it couldn't be tested on
   this dev machine; waitress is cross-platform and was actually verified.
-  A cloud deployment can only ever run demo mode — Foundry Local has no
-  Linux/hosted form, this is structural, not a config problem to solve.
+- **User deployed to Render, found demo mode's answers too short/limited**
+  (expected -- `demo_backend.chat()` returns one extracted sentence, not a
+  generated response; it was only ever meant to validate the pipeline
+  plumbing). Fixed by adding a **third backend**: `gemini_backend.py`
+  (`RAG_BACKEND=gemini`), a real hosted LLM via Google's `google-genai`
+  SDK, which works fine on Render (just an HTTPS call, no native-runtime
+  constraint like Foundry Local). `backend.py` now exposes `backend.name`
+  ("demo"/"gemini"/"foundry") instead of just the `is_demo` boolean --
+  `main.py`, `app.py`'s `/api/status`, and `static/script.js`'s status
+  pill all read this now. `generate.py`'s `SYSTEM_PROMPT` was rewritten to
+  ask for thorough, multi-paragraph, example-driven answers (previously
+  said "keep answers concise," which was fighting against what the user
+  wanted). Chose Gemini over Groq specifically because Groq has no
+  embeddings API -- would've meant two providers instead of one.
+  **Important process note**: initial web-doc lookups for the google-genai
+  SDK gave a wrong method name (`client.interactions.create`) that
+  doesn't exist in the installed package -- caught by cross-referencing
+  the PyPI README, the GitHub README, and finally the actual installed
+  SDK's type signatures via `inspect.signature()` before writing any code
+  against it. The real methods are `client.models.generate_content()` and
+  `client.models.embed_content()`. If web docs and installed source ever
+  disagree again, trust the installed source. Tests in
+  `tests/test_gemini_backend.py` mock the client but construct real
+  `google.genai.types` objects (not fake dicts), so the response-parsing
+  logic is genuinely exercised -- what's *not* tested is real API call
+  quality/behavior, which needs a real `GEMINI_API_KEY` the dev machine
+  doesn't have.
 
 ## What's left — the actual next step
 
@@ -212,3 +237,8 @@ print(result["answer"], result["sources"])
 - Don't rebuild the demo backend as a "better" fallback — it already served
   its purpose (validating the pipeline). Time is better spent getting the
   real models running now that admin access may be available.
+- Don't trust web documentation for the `google-genai` SDK's exact method
+  names without cross-checking the installed package — one doc page
+  confidently described a `client.interactions.create()` method that does
+  not exist in the actual SDK. If touching `gemini_backend.py`, verify
+  against `inspect.signature(...)` on the real installed classes first.

@@ -1,20 +1,28 @@
 # Deploying to Render
 
-## Important: this deploys demo mode, not real Foundry Local
+## Important: Foundry Local specifically can't run here
 
 Render runs Linux containers. Foundry Local is an **on-device** inference
 runtime — it doesn't have a Linux build reachable this way, and
 `foundry-local-sdk`'s own dependency (`foundry-local-core`) ships
 **Windows-only** wheels (confirmed: `pip install` on Linux fails outright
-trying to resolve it). So a Render deployment necessarily runs the offline
-`demo_backend.py` stand-in (keyword-based retrieval, extractive answers) —
-not the real embeddings/LLM. That's a real, structural limitation of what
-Foundry Local *is* (a local runtime, not a hosted service), not something
-fixable by configuration. Real Foundry Local answers still require running
-this app on your own Windows/Mac/Linux machine directly.
+trying to resolve it). That's a structural limitation of what Foundry Local
+*is* (a local runtime, not a hosted service), not something fixable by
+configuration.
+
+That still leaves two options for a Render deployment, chosen via the
+`RAG_BACKEND` environment variable:
+
+- **`RAG_BACKEND=demo`** — no API key, no cost, but short/extractive
+  keyword-matched answers (see `TEST_RESULTS.md` for what to expect).
+- **`RAG_BACKEND=gemini`** — real generated answers via Google's hosted
+  Gemini API. Needs a free `GEMINI_API_KEY`. **Recommended** — this is
+  what actually fixes the "answers are too short" problem, since it's a
+  real LLM rather than sentence extraction.
 
 `requirements-render.txt` reflects this: it deliberately excludes
-`foundry-local-sdk` and `openai`, installing only `flask` + `waitress`.
+`foundry-local-sdk` and `openai` (Windows-only/irrelevant here), but
+includes `google-genai` for the Gemini option.
 
 ## Option A: One-click via `render.yaml` (recommended)
 
@@ -38,17 +46,37 @@ If you'd rather configure it by hand instead of using the blueprint:
 2. **Runtime**: Python 3.
 3. **Build Command**: `pip install -r requirements-render.txt`
 4. **Start Command**: `python -m waitress --host=0.0.0.0 --port=$PORT app:app`
-5. **Environment Variables** → add:
-   - `RAG_BACKEND` = `demo`
+5. **Environment Variables** → add either:
+   - `RAG_BACKEND` = `demo` (no key needed), **or**
+   - `RAG_BACKEND` = `gemini` **and** `GEMINI_API_KEY` = *(your key from
+     [aistudio.google.com/apikey](https://aistudio.google.com/apikey))* —
+     paste the key directly into Render's Environment Variables field, not
+     anywhere that gets committed to git.
 6. **Instance Type**: Free is fine for demoing.
 7. Click **Create Web Service**.
+
+## Switching an already-deployed service between modes
+
+If you already deployed (e.g. with `RAG_BACKEND=demo`) and want to switch to
+Gemini:
+
+1. Go to your service in the Render dashboard.
+2. **Environment** (left sidebar) → **Environment Variables**.
+3. Change `RAG_BACKEND` from `demo` to `gemini`.
+4. Add a new variable: `GEMINI_API_KEY` = your key.
+5. Save — Render redeploys automatically with the new variables.
+6. Re-check `/api/status`: `backend` should now say `"gemini"`.
 
 ## After it's deployed
 
 - Visit the URL Render gives you — it should show the chat UI.
 - Check `https://<your-app>.onrender.com/api/status` — should return
-  `{"backend": "demo", "chunk_count": 219}` (or similar). If `chunk_count`
-  is `0`, something went wrong with ingestion; check the Render logs.
+  `{"backend": "demo"|"gemini", "chunk_count": 219}` (or similar). If
+  `chunk_count` is `0`, something went wrong with ingestion; check the
+  Render logs. If `backend` isn't what you expect, double check the
+  `RAG_BACKEND` environment variable value (it's case-insensitive but must
+  be exactly `demo` or `gemini`, nothing else, to not silently fall through
+  to the Foundry Local path which will fail on Render).
 - Ask a question through the UI to confirm end-to-end.
 
 ## Things to expect (not bugs)
@@ -66,6 +94,10 @@ If you'd rather configure it by hand instead of using the blueprint:
 - **Demo-mode answers**: expect the same keyword-matching behavior and
   limitations documented in `TEST_RESULTS.md` — this is the same code path
   already tested locally, not a different, less-tested one.
+- **Gemini free-tier rate limits**: Google's free tier caps requests per
+  minute/day. Fine for personal use and demoing; heavy or automated testing
+  could hit the limit and return an error from `gemini_backend.chat()` —
+  not a bug in this app, just the free tier's ceiling.
 
 ## Updating the deployed app
 

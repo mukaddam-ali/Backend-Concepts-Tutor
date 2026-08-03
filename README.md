@@ -47,10 +47,15 @@ implementation:
 
 - **`foundry_client.py`** (default) — real embeddings and generation via
   Microsoft Foundry Local, fully on-device.
+- **`gemini_backend.py`** (`RAG_BACKEND=gemini`) — real embeddings and
+  generation via Google's hosted Gemini API. Real generated answers (long,
+  well-explained, not just extracted sentences), and works anywhere with
+  internet access, including Render. Needs a `GEMINI_API_KEY`. See "Gemini
+  backend" below.
 - **`demo_backend.py`** (`RAG_BACKEND=demo`) — a pure-Python stand-in with no
   native dependencies: hashing-based keyword vectors instead of real
-  embeddings, and extractive sentence-picking instead of real generation. See
-  "Demo mode" below.
+  embeddings, and extractive sentence-picking instead of real generation.
+  Short, literal-keyword-match answers only. See "Demo mode" below.
 
 ## Setup
 
@@ -154,9 +159,43 @@ syntax.
 ## Deploying
 
 `run.bat`/`app.py` are for local use. To put this online, see
-[RENDER_DEPLOY.md](RENDER_DEPLOY.md) — note that a cloud deployment can
-only run in demo mode (`RAG_BACKEND=demo`), since Foundry Local is an
-on-device runtime with no Linux build reachable from a host like Render.
+[RENDER_DEPLOY.md](RENDER_DEPLOY.md). Foundry Local itself can't run there
+(on-device runtime, no Linux build) — but `RAG_BACKEND=gemini` works fine on
+Render, since it's just an HTTPS API call. Use `RAG_BACKEND=demo` only if you
+don't want to set up a Gemini API key.
+
+## Gemini backend (real answers, works on Render)
+
+Set `RAG_BACKEND=gemini` and a `GEMINI_API_KEY` environment variable to use
+a real hosted LLM instead of the extractive demo stand-in — proper
+multi-paragraph, well-explained answers, not single sentences.
+
+**Get a free API key:** [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
+(no credit card needed for the free tier). Treat it like a password —
+**never commit it to git or paste it into a chat**. Set it as an environment
+variable only:
+
+```bash
+# Windows cmd
+set RAG_BACKEND=gemini
+set GEMINI_API_KEY=your-key-here
+.venv\Scripts\python.exe app.py
+
+# PowerShell
+$env:RAG_BACKEND = "gemini"
+$env:GEMINI_API_KEY = "your-key-here"
+.venv\Scripts\python.exe app.py
+```
+
+On Render, add both as **Environment Variables** in the dashboard instead
+(Settings → Environment) rather than putting them in any file that gets
+committed.
+
+Uses `gemini-2.5-flash` for chat and `gemini-embedding-001` for embeddings
+(see `gemini_backend.py`). `generate.py`'s system prompt was rewritten to
+ask for thorough, example-driven, multi-paragraph answers — grounded in the
+retrieved context, but allowed to use general backend knowledge to explain
+and elaborate, rather than restricted to quoting the docs verbatim.
 
 ## Demo mode (no Foundry Local required)
 
@@ -204,8 +243,9 @@ is actually relevant, but don't expect this to behave like a real model.
 rag-backend-tutor/
 ├── docs/                # Knowledge base (markdown source documents)
 ├── db.py                # SQLite schema + helpers
-├── backend.py            # Picks foundry_client vs demo_backend (RAG_BACKEND env var)
+├── backend.py            # Picks foundry/gemini/demo backend (RAG_BACKEND env var)
 ├── foundry_client.py    # Real Foundry Local model setup (embedding + chat clients)
+├── gemini_backend.py     # Real Google Gemini API (embedding + chat), needs GEMINI_API_KEY
 ├── demo_backend.py       # Offline stand-in: hashing vectors + extractive "chat"
 ├── ingest.py             # Chunk + embed + store pipeline
 ├── retrieval.py          # get_top_chunks(query, k) via cosine similarity
@@ -226,21 +266,26 @@ rag-backend-tutor/
 ## Tests
 
 The full pipeline's *logic* is covered by unit tests that don't need Foundry
-Local running — chunking, cosine similarity, the SQLite layer, the demo
-backend's vectors/extraction, and `answer_query`'s source-citation behavior
-(exercised against `demo_backend` so no native dependency is required):
+Local running, real network access, or a real API key — chunking, cosine
+similarity, the SQLite layer, the demo backend's vectors/extraction,
+`answer_query`'s source-citation behavior, and `gemini_backend`'s
+request/response parsing (mocked against the actual `google-genai` SDK
+types, not a fake shape, so the parsing logic is genuinely exercised):
 
 ```bash
 .venv\Scripts\pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-All 27 tests pass as of this writing (includes `tests/test_app.py` for the
-Flask API). What's *not* covered by automated
-tests — because it requires the real models — is embedding quality and
-generated-answer quality with Foundry Local itself. Verify that manually
-once it's runnable: ask a mix of in-scope and out-of-scope questions through
-`main.py` and confirm retrieval finds the right doc and the fallback message
+All 30 tests pass as of this writing (includes `tests/test_app.py` for the
+Flask API). What's *not* covered by automated tests — because it requires a
+real network call and a real API key/model — is actual answer quality from
+Foundry Local or Gemini. The `gemini_backend.py` tests verify the
+request/response *parsing* is correct against real SDK types, not that a
+live call produces a good answer. Verify that manually once you have a key
+or a runnable Foundry Local: ask a mix of in-scope and out-of-scope
+questions through `main.py` and confirm retrieval finds the right doc and
+the fallback message
 appears for out-of-scope ones.
 
 ## Design decisions

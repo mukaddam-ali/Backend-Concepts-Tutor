@@ -16,11 +16,13 @@ def ensure_knowledge_base_ready() -> None:
 
 def main() -> None:
     print("=== Backend Concepts RAG Tutor ===")
-    if backend.is_demo:
+    if backend.name == "demo":
         print(
             "Running in DEMO MODE (RAG_BACKEND=demo): keyword-based retrieval, "
             "no real embeddings or LLM. Unset RAG_BACKEND to use Foundry Local."
         )
+    elif backend.name == "gemini":
+        print("Backend: Google Gemini (RAG_BACKEND=gemini, real hosted LLM)")
     else:
         print("Backend: Foundry Local (offline on-device inference)")
     print("Ask a question about backend engineering. Type 'exit' to quit.\n")

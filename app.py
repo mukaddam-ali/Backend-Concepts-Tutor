@@ -40,7 +40,7 @@ def index():
 def status():
     return jsonify(
         {
-            "backend": "demo" if backend.is_demo else "foundry",
+            "backend": backend.name,
             "chunk_count": db.count_chunks(),
         }
     )

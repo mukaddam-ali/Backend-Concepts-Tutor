@@ -338,13 +338,13 @@ async function loadStatus() {
   try {
     const res = await fetch("/api/status");
     const data = await res.json();
-    if (data.backend === "demo") {
-      statusDot.style.background = "var(--destructive)";
-      statusText.textContent = `Demo mode · ${data.chunk_count} chunks`;
-    } else {
-      statusDot.style.background = "var(--primary)";
-      statusText.textContent = `Foundry Local · ${data.chunk_count} chunks`;
-    }
+    const labels = {
+      demo: "Demo mode",
+      gemini: "Google Gemini",
+      foundry: "Foundry Local",
+    };
+    statusDot.style.background = data.backend === "demo" ? "var(--destructive)" : "var(--primary)";
+    statusText.textContent = `${labels[data.backend] ?? data.backend} · ${data.chunk_count} chunks`;
   } catch {
     statusText.textContent = "Backend unreachable";
   }

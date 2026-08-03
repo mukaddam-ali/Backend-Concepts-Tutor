@@ -38,7 +38,7 @@ def test_index_serves_html(tmp_path, monkeypatch):
 
 def test_status_reports_demo_backend_and_chunk_count(tmp_path, monkeypatch):
     _use_demo_backend(monkeypatch)
-    monkeypatch.setattr(backend, "is_demo", True)
+    monkeypatch.setattr(backend, "name", "demo")
     _seed(tmp_path, monkeypatch)
 
     response = _client().get("/api/status")
