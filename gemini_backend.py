@@ -12,7 +12,7 @@ demo mode's short, extractive, one-sentence-only responses.
 
 from google import genai
 
-CHAT_MODEL = "gemini-2.5-flash"
+CHAT_MODEL = "gemini-flash-latest"
 EMBEDDING_MODEL = "gemini-embedding-001"
 
 _client = None
