@@ -14,7 +14,7 @@ Set the RAG_BACKEND environment variable to:
 
 import os
 
-_BACKEND_NAME = os.environ.get("RAG_BACKEND", "foundry").lower()
+_BACKEND_NAME = os.environ.get("RAG_BACKEND", "foundry").strip().lower()
 is_demo = _BACKEND_NAME == "demo"
 
 if is_demo:
