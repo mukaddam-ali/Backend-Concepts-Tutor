@@ -1,311 +1,254 @@
-# Backend Concepts RAG Tutor
+# Backend Concepts Tutor
 
-An offline Q&A chatbot that answers questions about core backend engineering
-concepts, using Retrieval-Augmented Generation (RAG) and
-[Microsoft Foundry Local](https://learn.microsoft.com/azure/ai-foundry/foundry-local/what-is-foundry-local)
-for fully on-device LLM inference. No internet connection or cloud account is
-needed at runtime.
+A little offline chatbot that knows about backend engineering — REST vs
+GraphQL, caching, message queues, database sharding, CAP theorem, all of
+it — and answers your questions about it without ever touching the
+internet. No API key, no cloud bill, no "your request could not be
+completed." It runs the whole thing — retrieval *and* generation — on your
+own machine, using [Microsoft Foundry Local](https://learn.microsoft.com/azure/ai-foundry/foundry-local/what-is-foundry-local)
+to run a real language model locally.
 
-**34 topics** across: REST APIs, GraphQL, SQL vs NoSQL, database types
-(document/key-value/graph/column/time-series/search), ORMs & the N+1
-problem, database normalization, CAP theorem, indexing, replication &
-sharding, transactions & ACID, auth, caching, CDNs, message queues, load
-balancing, WebSockets, API design & versioning, rate limiting,
-microservices vs monolith, architectural patterns (12-factor, service
-mesh), observability, containerization, Kubernetes, serverless, CI/CD,
-horizontal vs vertical scaling, CORS, web security fundamentals (OWASP,
-TLS, hashing), testing fundamentals, web servers & reverse proxies,
-resilience patterns (circuit breakers, backpressure), internet
-fundamentals (DNS/HTTP/hosting), version control with Git, and RAG/vectors/
-embeddings. Topic selection is informed by [roadmap.sh/backend](https://roadmap.sh/backend)'s
-structure, and each doc added from that pass links free, verified
-resources for further reading.
+This started as a class project built around Retrieval-Augmented
+Generation (RAG): instead of trusting a language model to just "know"
+things, you give it a curated set of documents, let it search those
+documents for whatever's relevant to the question being asked, and only
+then let it write an answer — grounded in what it actually found, not
+whatever it half-remembers from training. The assignment specifically
+wanted this running fully offline with a real on-device model, not a
+wrapper around ChatGPT or Gemini, which is exactly what this is.
 
-See [PROJECT_REPORT.md](PROJECT_REPORT.md) for a presentation-style writeup,
-[TEST_RESULTS.md](TEST_RESULTS.md) for real test transcripts and findings,
-and [PRESENTATION.md](PRESENTATION.md) for a demo script.
+## What it actually does
 
-## How it works
+You ask it something like *"why would I use a message queue?"* and here's
+what happens under the hood:
 
-1. `docs/*.md` — a small knowledge base of backend-concept articles.
-2. `ingest.py` — splits each doc into passage-level chunks, embeds each chunk,
-   and stores `(source, content, embedding)` rows in a local SQLite database
-   (`knowledge.db`).
-3. `retrieval.py` — embeds a user's question and does a brute-force cosine
-   similarity search over the stored embeddings to find the top-K most
-   relevant chunks.
-4. `generate.py` — builds a prompt from the retrieved chunks (instructing the
-   model to answer only from context, cite the source doc, and say "I don't
-   know" if the answer isn't covered) and calls the chat model.
-5. Two interfaces share the same pipeline:
-   - `main.py` — a CLI loop: ask a question, get an answer, repeat.
-   - `app.py` — a Flask API + web chat UI (`static/`), see "Web frontend"
-     below.
+1. Your question gets turned into a vector (an embedding) — a list of
+   numbers that captures what the question is *about*, semantically.
+2. That vector gets compared against the vectors of every chunk of text in
+   the knowledge base, and the closest matches win.
+3. Those matching passages get stuffed into a prompt along with your
+   question, and handed to a local LLM with instructions to answer
+   *from that context* — and to admit it doesn't know rather than make
+   something up if the context doesn't actually cover it.
+4. You get back a real, generated, multi-paragraph answer, with the source
+   document cited.
 
-Steps 2–4 call through `backend.py`, which picks the actual embedding/chat
-implementation:
+All of that — steps 1 through 4 — happens on your machine, via Foundry
+Local. No network calls at inference time, at all. I confirmed this
+directly by watching the network tab while asking questions: every request
+goes to `127.0.0.1`, nothing else.
 
-- **`foundry_client.py`** (default) — real embeddings and generation via
-  Microsoft Foundry Local, fully on-device.
-- **`gemini_backend.py`** (`RAG_BACKEND=gemini`) — real embeddings and
-  generation via Google's hosted Gemini API. Real generated answers (long,
-  well-explained, not just extracted sentences), and works anywhere with
-  internet access, including Render. Needs a `GEMINI_API_KEY`. See "Gemini
-  backend" below.
-- **`demo_backend.py`** (`RAG_BACKEND=demo`) — a pure-Python stand-in with no
-  native dependencies: hashing-based keyword vectors instead of real
-  embeddings, and extractive sentence-picking instead of real generation.
-  Short, literal-keyword-match answers only. See "Demo mode" below.
+## The knowledge base
+
+34 topics, written from scratch and shaped around
+[roadmap.sh/backend](https://roadmap.sh/backend)'s actual structure (that
+site renders its roadmap as an interactive SVG diagram, so getting the real
+node list took pulling text directly out of the SVG in a browser — a plain
+`fetch` just gets you an empty shell). Covers the fundamentals: REST APIs,
+GraphQL, SQL vs NoSQL, database types, indexing, replication & sharding,
+transactions & ACID, normalization, CAP theorem, auth, caching, CDNs,
+message queues, load balancing, WebSockets, API versioning, rate limiting,
+microservices vs monoliths, architectural patterns, observability,
+Docker, Kubernetes, serverless, CI/CD, scaling, CORS, web security
+fundamentals, testing, web servers & reverse proxies, resilience patterns,
+internet fundamentals, Git, and — a little self-referentially — how RAG
+itself works. Each doc that came from the roadmap pass also links a few
+free resources for further reading, and every single one of those links
+was actually checked to make sure it resolves (a surprising number of
+"well-known" doc URLs don't, once you check).
+
+That's a lot more than the "20 or so files" this needed to be, on purpose —
+better to have real breadth than pad out 20 thin ones.
 
 ## Setup
 
 ### 1. Install Foundry Local
 
-Foundry Local is a separate runtime from the Python SDK — it must be
-installed on the machine (not just `pip install`-ed):
+This is a separate runtime, not just a Python package — it has to be
+installed on the machine itself:
 
 ```bash
 winget install Microsoft.FoundryLocal
 ```
 
-**Known issue on this machine:** Foundry Local's native core depends on
-`onnxruntime.dll`, which in turn requires the **Microsoft Visual C++
-2015–2022 Redistributable (x64)**. If `foundry model list` (or running this
-app) fails with `FileNotFoundError: Could not find module '...onnxruntime.dll'
-(or one of its dependencies)`, that redistributable is missing. Install it
-with:
+**If this fails with a DLL error** (`FileNotFoundError: Could not find
+module '...onnxruntime.dll'`), you're missing the Microsoft Visual C++
+2015–2022 Redistributable, which Foundry Local's native core depends on:
 
 ```bash
 winget install Microsoft.VCRedist.2015+.x64
 ```
 
-This installer requires **administrator rights** (a UAC prompt). On a machine
-where you don't have admin access, ask whoever administers it to run that one
-command — no other workaround exists, since both the `foundry` CLI daemon and
-the Python SDK's embedded native core link the same DLL.
+That one needs admin rights (a UAC prompt) — there's no way around it, it's
+a hard dependency of the native runtime, not something the Python side can
+route around.
 
-### 2. Set up the Python environment
+Sanity check it worked:
 
 ```bash
-cd rag-backend-tutor
+foundry model list
+```
+
+If that prints a table of models with no error, you're good.
+
+### 2. Set up Python
+
+```bash
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 ```
 
-### 3. Run
+### 3. Run it
 
 ```bash
-.venv\Scripts\python main.py
+.venv\Scripts\python.exe main.py
 ```
 
-On first run, it will automatically download the embedding model
-(`qwen3-embedding-0.6b`) and chat model (`phi-3.5-mini`) via Foundry Local
-(requires internet for this one-time download only), ingest `docs/*.md` into
-`knowledge.db`, then start the Q&A loop.
+First run will download two small models (a few hundred MB total) and
+build the knowledge base — needs internet for that *one-time* download
+only. After that, everything's local. Ask it a question, type `exit` when
+you're done.
 
-To re-run ingestion manually (e.g. after editing `docs/`):
-
-```bash
-.venv\Scripts\python ingest.py
-```
-
-## Web frontend
-
-A chat-style web UI is available as an alternative to the CLI, sharing the
-exact same `generate.answer_query()` pipeline underneath:
+Prefer a browser instead of a terminal?
 
 ```bash
-.venv\Scripts\python app.py
-```
-
-Then open `http://127.0.0.1:5000`. It's a Flask API (`app.py`) serving a
-static HTML/JS/Tailwind chat UI (`static/`) with a ChatGPT-style layout:
-
-- Left sidebar with a **New Chat** button and a list of past conversations
-  (stored in the browser's `localStorage`, titled after each conversation's
-  first message).
-- Empty-state suggested-question chips (randomized from a pool of topics) to
-  kick off a conversation.
-- ChatGPT-style message layout: user messages as right-aligned bubbles,
-  assistant messages as plain full-width text with an avatar, no bubble.
-- Conversations persist across page reloads and can be deleted individually.
-
-Theme: a shadcn/ui-style palette (neutral grays, burnt-orange `#bf4d00`
-primary/accent, `system-ui` font stack, 10px border radius) matching a
-reference site the user provided, with light/dark variants following the
-OS's `prefers-color-scheme`.
-
-The status pill in the sidebar footer shows which backend is active (Foundry
-Local vs demo) and how many chunks are loaded. `RAG_BACKEND=demo` works the
-same way here as with the CLI. Conversation history is a UI/organizational
-feature only — each question is still answered independently by
-`generate.answer_query()`, with no conversational memory fed back into
-retrieval or the prompt.
-
-API surface, if building against it directly:
-- `GET /api/status` → `{backend, chunk_count}`
-- `POST /api/chat` with `{"message": "..."}` → `{answer, sources}`
-
-The UI is responsive (mobile/tablet/desktop breakpoints, a collapsible
-sidebar with a mobile overlay/hamburger toggle) and uses `100dvh` rather
-than `100vh` so content isn't cut off behind mobile browser toolbars. A
-themed favicon (`static/favicon.svg` + PNG variants) reuses the same
-circle-and-cross glyph as the header logo and chat avatar.
-
-On Windows, `run.bat` / `run_demo.bat` do the same thing as the commands
-above without needing to remember `cmd` vs PowerShell environment-variable
-syntax.
-
-## Deploying
-
-`run.bat`/`app.py` are for local use. To put this online, see
-[RENDER_DEPLOY.md](RENDER_DEPLOY.md). Foundry Local itself can't run there
-(on-device runtime, no Linux build) — but `RAG_BACKEND=gemini` works fine on
-Render, since it's just an HTTPS API call. Use `RAG_BACKEND=demo` only if you
-don't want to set up a Gemini API key.
-
-## Gemini backend (real answers, works on Render)
-
-Set `RAG_BACKEND=gemini` and a `GEMINI_API_KEY` environment variable to use
-a real hosted LLM instead of the extractive demo stand-in — proper
-multi-paragraph, well-explained answers, not single sentences.
-
-**Get a free API key:** [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-(no credit card needed for the free tier). Treat it like a password —
-**never commit it to git or paste it into a chat**. Set it as an environment
-variable only:
-
-```bash
-# Windows cmd
-set RAG_BACKEND=gemini
-set GEMINI_API_KEY=your-key-here
-.venv\Scripts\python.exe app.py
-
-# PowerShell
-$env:RAG_BACKEND = "gemini"
-$env:GEMINI_API_KEY = "your-key-here"
 .venv\Scripts\python.exe app.py
 ```
 
-On Render, add both as **Environment Variables** in the dashboard instead
-(Settings → Environment) rather than putting them in any file that gets
-committed.
+then open `http://127.0.0.1:5000` — same brain, ChatGPT-style web UI with
+conversation history (saved in your browser, not sent anywhere).
 
-Uses `gemini-2.5-flash` for chat and `gemini-embedding-001` for embeddings
-(see `gemini_backend.py`). `generate.py`'s system prompt was rewritten to
-ask for thorough, example-driven, multi-paragraph answers — grounded in the
-retrieved context, but allowed to use general backend knowledge to explain
-and elaborate, rather than restricted to quoting the docs verbatim.
+## Is it actually good?
 
-## Demo mode (no Foundry Local required)
+I ran 23 real questions through the real pipeline — 20 that the knowledge
+base should be able to answer, and 3 it deliberately shouldn't (like "can
+you recommend a good pizza recipe?"). Final score: **23/23.** All 20
+in-scope questions got answered correctly with the right source cited, and
+all 3 out-of-scope ones got a clean "I don't have information about that"
+instead of a guess.
 
-If Foundry Local isn't runnable yet (e.g. the VC++ Redistributable above
-isn't installed), set `RAG_BACKEND=demo` to exercise the full pipeline with
-`demo_backend.py` instead — real chunking, real SQLite storage, real
-retrieval, just no real embeddings or LLM:
+That second part didn't work on the first try, and it's worth mentioning
+honestly: the first real run answered *all three* of the trick questions
+anyway — it correctly said "Paris" to "what's the capital of France," and
+even wrote out a full pizza recipe from memory, both from its own general
+knowledge, completely ignoring that neither had anything to do with the
+retrieved context. Turned out retrieval was returning *some* passage no
+matter how irrelevant the question was — there's always a "closest" chunk,
+even when closest still isn't close — and the small model was happy to
+just answer from what it already knew rather than admit it couldn't help.
+Fixed by measuring the actual similarity scores (real matches scored
+0.6–0.8, the irrelevant ones topped out around 0.35) and adding a cutoff
+below which retrieval returns nothing at all, plus tightening the model's
+instructions to explicitly forbid answering from outside knowledge. After
+that, all three declined instantly.
 
-```bash
-# Windows cmd
-set RAG_BACKEND=demo
-.venv\Scripts\python ingest.py
-.venv\Scripts\python main.py
+Full transcripts and the story behind that fix are in
+[TEST_RESULTS.md](TEST_RESULTS.md).
 
-# PowerShell
-$env:RAG_BACKEND = "demo"
-.venv\Scripts\python ingest.py
-.venv\Scripts\python main.py
+## About the model size (an honest tradeoff)
 
-# bash
-RAG_BACKEND=demo .venv/Scripts/python ingest.py
-RAG_BACKEND=demo .venv/Scripts/python main.py
+The chat model is `qwen2.5-0.5b` — small, as local LLMs go. That wasn't the
+first choice. `phi-3.5-mini` (bigger, generally sharper) was tried first
+and was unusably slow on this hardware — 55 seconds for a one-word answer,
+and the real question-answering prompt reliably timed out before finishing
+at all. `qwen2.5-1.5b` landed in a nicer middle ground — noticeably better
+answers, and it actually passed 22 of the 23 test questions — but this
+particular machine has very little free RAM, and under that pressure it
+would occasionally hang on a question that had worked fine moments
+earlier. Reliability won. `qwen2.5-0.5b` isn't going to write a PhD thesis,
+but it's consistent, it cites its sources correctly, and it never leaves
+you staring at a spinner. On a machine with more headroom, bumping
+`CHAT_MODEL_ALIAS` in `foundry_client.py` up to `qwen2.5-1.5b` is worth
+trying — the code doesn't care which model it's pointed at.
+
+## About the live demo link
+
+There's a public link — [backend-concepts-tutor.onrender.com](https://backend-concepts-tutor.onrender.com)
+— but it's worth being upfront about what it actually is: a lighter
+keyword-matching version, **not** the real offline LLM. Foundry Local is an
+on-device runtime, not a web service, so it literally cannot run on a
+cloud host like Render — there's no version of "host Foundry Local
+online" that makes sense, the same way you can't "host" a program that
+only runs on your own GPU driver. The public link exists so the UI and
+retrieval pipeline are visible to anyone without needing to install
+anything, but the actual assignment — a real local model doing real
+generation — only exists by running this repo on your own machine as
+described above.
+
+## Project layout
+
+```
+docs/                   Knowledge base — the actual source material
+db.py                   SQLite storage for chunks + their embeddings
+ingest.py               Splits docs into chunks, embeds them, stores them
+retrieval.py            Finds the most relevant chunks for a question
+generate.py             Builds the prompt, calls the model, returns the answer
+backend.py              Picks which model backend to use (see below)
+foundry_client.py       Real on-device Foundry Local (the default)
+demo_backend.py         Offline keyword-matching stand-in, no real model
+gemini_backend.py       Optional real cloud LLM (Google Gemini) — not the graded path, see below
+main.py                 CLI
+app.py                  Flask API + web UI
+static/                 The web UI itself (HTML/CSS/JS)
+tests/                  30 unit tests, all pass without needing a real model
+TEST_RESULTS.md         Real test transcripts, warts and all
+HANDOFF.md              Full project history — every bug hit and how it got fixed
 ```
 
-Demo mode uses an IDF-weighted hashing bag-of-words vector for "embeddings"
-(so retrieval is lexical/keyword overlap, not real semantic similarity) and
-extractive sentence-picking for "generation" (so answers are quoted straight
-from a doc, not composed by a model). It's useful for confirming the
-chunking → storage → retrieval → prompt-assembly pipeline works, but it is
-**not** a substitute for the real models — unset `RAG_BACKEND` (or set it to
-`foundry`) once Foundry Local can actually run.
+`backend.py` decides which of the three model implementations to use, via
+the `RAG_BACKEND` environment variable:
 
-Note: IDF weighting (down-weighting terms that appear in most docs, e.g.
-"server", "request") was added after testing showed plain term-frequency
-vectors ranked irrelevant chunks above the actually-relevant one once the
-knowledge base grew past ~10 docs. Even with that fix, demo mode occasionally
-pulls in a partially-irrelevant chunk alongside the correct one (it's exact
-keyword matching, not real semantic understanding) — the extractive `chat()`
-step usually still picks the right sentence from whichever retrieved chunk
-is actually relevant, but don't expect this to behave like a real model.
+- unset (default) → **Foundry Local** — real, on-device, this is the point
+  of the project
+- `demo` → keyword-matching stand-in, no model at all — what the public
+  Render link runs, and useful for testing the plumbing without waiting on
+  model downloads
+- `gemini` → real hosted Gemini — built during development as a way to get
+  real generated answers onto a cloud host before Foundry Local was
+  confirmed working locally; not used going forward since the assignment
+  specifically rules out cloud LLMs
 
-## Project structure
-
-```
-rag-backend-tutor/
-├── docs/                # Knowledge base (markdown source documents)
-├── db.py                # SQLite schema + helpers
-├── backend.py            # Picks foundry/gemini/demo backend (RAG_BACKEND env var)
-├── foundry_client.py    # Real Foundry Local model setup (embedding + chat clients)
-├── gemini_backend.py     # Real Google Gemini API (embedding + chat), needs GEMINI_API_KEY
-├── demo_backend.py       # Offline stand-in: hashing vectors + extractive "chat"
-├── ingest.py             # Chunk + embed + store pipeline
-├── retrieval.py          # get_top_chunks(query, k) via cosine similarity
-├── generate.py            # answer_query(question) — retrieval + chat call
-├── main.py               # CLI entry point
-├── app.py                # Flask API + web chat UI entry point
-├── static/               # index.html, style.css, script.js, favicon assets
-├── run.bat, run_demo.bat # Windows one-liners for `python app.py` (with/without demo mode)
-├── requirements.txt      # Full deps (includes Windows-only foundry-local-sdk)
-├── requirements-render.txt  # Lean deps for cloud/Linux deployment (no Foundry SDK)
-├── requirements-dev.txt  # adds pytest
-├── render.yaml           # Render Blueprint config
-├── RENDER_DEPLOY.md      # Deployment guide
-├── tests/                # unit tests (all pass without Foundry Local)
-└── knowledge.db          # created on first ingestion run
-```
-
-## Tests
-
-The full pipeline's *logic* is covered by unit tests that don't need Foundry
-Local running, real network access, or a real API key — chunking, cosine
-similarity, the SQLite layer, the demo backend's vectors/extraction,
-`answer_query`'s source-citation behavior, and `gemini_backend`'s
-request/response parsing (mocked against the actual `google-genai` SDK
-types, not a fake shape, so the parsing logic is genuinely exercised):
+## Running the tests
 
 ```bash
 .venv\Scripts\pip install -r requirements-dev.txt
-.venv\Scripts\python -m pytest tests/ -v
+.venv\Scripts\python.exe -m pytest tests/ -v
 ```
 
-All 30 tests pass as of this writing (includes `tests/test_app.py` for the
-Flask API). What's *not* covered by automated tests — because it requires a
-real network call and a real API key/model — is actual answer quality from
-Foundry Local or Gemini. The `gemini_backend.py` tests verify the
-request/response *parsing* is correct against real SDK types, not that a
-live call produces a good answer. Verify that manually once you have a key
-or a runnable Foundry Local: ask a mix of in-scope and out-of-scope
-questions through `main.py` and confirm retrieval finds the right doc and
-the fallback message
-appears for out-of-scope ones.
+30 tests, all passing, covering chunking, similarity math, the SQLite
+layer, and source-citation logic — none of them need Foundry Local running,
+so they're fast and don't require any model downloads. What they *don't*
+cover is real answer quality, since that needs an actual model generating
+actual text — that's what the 23-question suite in `TEST_RESULTS.md` is
+for.
 
-## Design decisions
+## A few design decisions, and why
 
-- **Models**: `qwen3-embedding-0.6b` for embeddings, `phi-3.5-mini` for chat
-  — both small enough to run responsively on a laptop CPU.
-- **Chunking**: paragraphs are grouped two at a time to form passage-level
-  chunks (~1–3 paragraphs), matching what the RAG pattern typically expects.
-- **Retrieval**: brute-force cosine similarity over all stored vectors in
-  Python. Fine at this scale (a few dozen chunks); would need an actual
-  vector index for a much larger document set.
-- **Prompting**: the system prompt instructs the model to answer only from
-  retrieved context, cite the source document, and explicitly say it doesn't
-  know rather than guessing — reducing hallucination.
+- **Chunking**: two paragraphs per chunk. Small enough to keep retrieval
+  precise, big enough to keep the context coherent.
+- **Retrieval**: brute-force cosine similarity in Python, checked against
+  every stored chunk. That's plenty fast at this scale (a few hundred
+  chunks) — a real vector index would only start to matter with a
+  knowledge base orders of magnitude bigger than this one.
+- **The "I don't know" fallback**: not just prompt wording — a real
+  similarity cutoff in `retrieval.py` (see "Is it actually good?" above).
+  Prompt instructions alone weren't enough to stop a small model from
+  answering off-topic questions from its own memory; the fix had to
+  happen before the question ever reached the model.
+- **Two interfaces, one brain**: the CLI and the web UI both call the exact
+  same `generate.answer_query()` — no duplicated logic, no risk of them
+  drifting apart in behavior.
 
 ## Known limitations
 
-- Single-machine, single-user — no concurrency handling.
-- Retrieval is brute-force, not indexed — won't scale past a few hundred
-  chunks without a real vector index.
-- Foundry Local's embedding/generation quality is unverified on this machine
-  pending the VC++ Redistributable install — the demo backend confirms the
-  *pipeline* works, not the real model output.
+- Single-user, single-machine — there's no concurrency story here, and it
+  doesn't need one for what this is.
+- Retrieval scales to maybe a few hundred chunks comfortably before you'd
+  actually need a real vector index instead of brute-force comparison.
+- Answers are only as good as a 0.5B-parameter model gets — accurate, but
+  occasionally repetitive in how it phrases things. See the model-size
+  section above for why that tradeoff was made deliberately.
+- The very first request after a fresh install (or after Foundry Local's
+  local database gets wiped) will sit there for a few minutes while it
+  builds the knowledge base from scratch — there's no loading indicator
+  for that yet, so it can look stuck when it isn't.
