@@ -39,11 +39,17 @@ HTTPS API — confirmed, see "Render deployment" section below) — if the
 professor needs to see it live rather than in a local demo, that's an
 open question to raise with them, not something to solve in code.
 
-**Status as of 2026-08-03: Foundry Local is now confirmed working
-end-to-end on this machine** (a different, admin-rights machine than the
-one the demo/Gemini backends were built on). Full story in "Already done"
-below under "Real Foundry Local pipeline verified end-to-end" — read it
-before touching `foundry_client.py` or `ingest.py`'s batch size again.
+**Status as of 2026-08-04: project is functionally complete.** Foundry
+Local runs end-to-end, fully offline, and the real 23-question test suite
+passes **23/23** (20/20 in-scope answered correctly, 3/3 out-of-scope
+correctly declined) — see `TEST_RESULTS.md` for the real transcripts. Full
+story in "Already done" below under "Real Foundry Local pipeline verified
+end-to-end" and "Out-of-scope hallucination fixed, 23/23 achieved" — read
+both before touching `foundry_client.py`, `retrieval.py`, or `generate.py`'s
+`SYSTEM_PROMPT` again. The user decided to **stop maintaining the Render
+deployment** (Foundry Local can't run there anyway) — it's not part of what
+gets submitted/graded going forward; no further Render work is expected
+unless the user brings it up again.
 
 ## Live status as of 2026-08-02 (Render/Gemini — now secondary, kept for history)
 
@@ -237,55 +243,32 @@ repo can show you directly). Currently running `RAG_BACKEND=demo` —
 
 ## What's left — the actual next steps
 
-**Priority 1 — decide if `qwen2.5-0.5b`'s answer quality is good enough, or
-try a slightly bigger model.** Foundry Local works end-to-end now (see
-"Already done" below), but the chat model was picked purely to dodge an
-internal timeout, not for quality — it's a 0.5B-parameter model and it
-shows (verbose, sometimes-inaccurate paraphrasing; e.g. it described vector
-search as a "knowledge graph" once, which isn't right). Options, in order
-of effort:
-- Ask the user if the current quality is acceptable for the assignment —
-  it does correctly cite the right source doc and gives a real generated
-  multi-paragraph answer, which may be all that's actually required.
-- Try `qwen3-1.7b` or `qwen2.5-1.5b` (still much smaller than `phi-3.5-mini`)
-  and re-measure timing the same way this session did: warm the chat client
-  once via `foundry_client.get_chat_client()`, then time a real
-  `generate.answer_query(...)` call. If it finishes without
-  `FoundryLocalException: ... Operation was cancelled` in well under a
-  minute, it's a viable upgrade.
-- If quality still isn't good enough even at the largest model that avoids
-  the timeout, the next lever is `generate.py`'s `SYSTEM_PROMPT` — it
-  currently asks for "thorough, multi-paragraph, example-driven answers,"
-  which costs generation time on a slow model; asking for something shorter
-  buys headroom to use a bigger/smarter model instead.
+**Nothing blocking.** The core deliverable works: fully offline, real
+on-device LLM, answers only from `docs/*.md`, 23/23 on the real test suite.
+Remaining items are polish/optional, not required to consider this done:
 
-**Priority 2 — run the real pipeline through `app.py` (the web UI) and
-`main.py` (the CLI), not just raw `generate.answer_query()` calls in a
-Python shell.** Only the underlying function has been exercised so far.
-Confirm the Flask app's `ensure_knowledge_base_ready()` before_request hook
-correctly triggers ingestion (or finds the existing `knowledge.db` on disk
-skip case) with the local venv, and that a real browser session against
-`http://127.0.0.1:5000` works end-to-end, including the ~40s/answer latency
-being tolerable in the actual UI (loading state, no timeout on the Flask/
-frontend side cutting the request short before Foundry Local responds).
-
-**Priority 3 — re-run the test suite from `TEST_RESULTS.md` against the
-real model.** It has 23 test questions (20 in-scope, 3 out-of-scope) that
-were run against the demo backend, including 2 documented false positives
-specific to the demo backend's crude keyword matching. Re-run the same 23
-against the real Foundry Local pipeline and update `TEST_RESULTS.md` — the
-2 known-failing out-of-scope questions are the most important to re-check,
-since a real LLM should handle "I don't know" cases correctly where
-keyword matching couldn't.
-
-**Priority 4 (raise with the user, not something to decide unilaterally) —
-what happens to the Render deployment?** Foundry Local cannot run there
-(Windows-only native runtime, confirmed, see the Render section below), so
-if the professor's offline requirement really does rule out any cloud LLM,
-the Render/Gemini deployment may no longer be part of what gets submitted/
-graded — or the user may want it kept as a separate "cloud demo" alongside
-a local "offline demo," with both explained. Don't silently decide either
-way; ask.
+- **Optional quality upgrade**: `qwen2.5-0.5b` is reliable but small
+  (occasionally repetitive phrasing). `qwen2.5-1.5b` gives noticeably
+  better answers but was reverted due to intermittent timeouts on *this*
+  machine specifically (only ~1.2GB RAM free — see "Real Foundry Local
+  pipeline verified end-to-end" below). If a future session runs on a
+  machine with meaningfully more free RAM, re-try `qwen2.5-1.5b` in
+  `foundry_client.CHAT_MODEL_ALIAS` and re-run the full 23-question suite
+  (script pattern: warm `foundry_client.get_chat_client()` once, then loop
+  `generate.answer_query(...)` over the 23 questions from
+  `TEST_RESULTS.md`, checking none raise `FoundryLocalException`).
+- **`app.py` first-load latency isn't surfaced to the user**: when
+  `knowledge.db` doesn't exist yet, the *first* HTTP request of any kind
+  blocks synchronously for as long as full ingestion takes (confirmed:
+  several minutes for 219 chunks on this machine) with no loading
+  indicator — the browser just hangs. Not a bug (ingestion completes
+  correctly), but a rough edge if the user demos this cold. A nice-to-have
+  fix would be showing a "warming up" state in `static/script.js`, or
+  running ingestion at process startup instead of lazily on first request.
+- **Render deployment**: user decided to stop maintaining it (see above).
+  If they ask about it later, it's still live on `demo` mode last we
+  checked — up to the user whether to suspend/delete it via their Render
+  dashboard.
 
 ### Foundry Local setup — already done on this machine, keep for reference
 
@@ -358,7 +341,52 @@ and a real `generate.answer_query("How does RAG (Retrieval-Augmented
 Generation) work?")` call, which returned a real generated multi-paragraph
 answer correctly sourced from `rag-vectors-embeddings` — confirming
 retrieval, generation, and source-citation all work with zero network
-calls at inference time.
+calls at inference time. Also confirmed both real entry points work, not
+just the raw function: `main.py` (piped a real question through the CLI)
+and `app.py` (started the Flask dev server, drove it through an actual
+browser, clicked a suggested-question chip, got a real generated answer
+back in the UI).
+
+### Out-of-scope hallucination fixed, 23/23 achieved (2026-08-04)
+
+Running the real `TEST_RESULTS.md` 23-question suite against the real
+pipeline for the first time surfaced a genuine regression: all 20 in-scope
+questions were answered correctly, but **0/3 out-of-scope questions were
+declined** (worse than the old demo backend's 1/3) — the model answered
+"What is the capital of France?" correctly from its own training knowledge,
+and even generated a full pizza recipe from scratch for "Can you recommend
+a good pizza recipe?", instead of saying "I don't have information about
+that in my knowledge base." Two compounding causes, both fixed:
+
+1. `retrieval.get_top_chunks()` had no relevance cutoff — it always
+   returned the *k* nearest chunks no matter how irrelevant, so
+   `generate.py`'s "no chunks retrieved → decline" fallback could never
+   fire. Measured real `qwen3-embedding-0.6b` cosine similarity scores:
+   in-scope questions' top chunk scored 0.6-0.82; the 3 out-of-scope
+   questions topped out at 0.3-0.37 — a clean, wide gap. Added
+   `retrieval.MIN_SIMILARITY = 0.45` to filter below that.
+2. `generate.py`'s `SYSTEM_PROMPT` explicitly said the model "may use
+   general backend engineering knowledge," which a small model read as
+   license to answer off-topic questions from its own training data
+   rather than declining. Tightened to explicitly forbid this.
+
+After both fixes: all 23 questions pass, and out-of-scope ones now resolve
+**instantly** (no LLM call at all, since retrieval returns zero chunks) —
+see `TEST_RESULTS.md` for full transcripts. **If you touch `SYSTEM_PROMPT`
+or `MIN_SIMILARITY` again, re-run the 23-question suite before considering
+it done** — this exact failure mode (in-scope works, out-of-scope silently
+regresses) is easy to reintroduce without noticing, since it only shows up
+on questions outside the knowledge base.
+
+Separately, while chasing better answer quality, `qwen2.5-1.5b` was tried
+as an upgrade from `qwen2.5-0.5b` (see the model swap history above) and
+got 22/23 on its first run, but `foundry status` revealed this machine has
+only ~1.2GB RAM free of 7.3GB total, and under that pressure the bigger
+model intermittently re-hit the "Operation was cancelled" timeout even on
+a question that had just succeeded — 2 retries didn't reliably fix it.
+Reverted to `qwen2.5-0.5b` for reliability. Also added a retry-on-
+cancellation wrapper in `foundry_client.chat()` (`_CHAT_RETRIES = 2`) as
+defense in depth regardless of which model is configured.
 
 ### After that, optional stretch goals (not started, not required)
 
