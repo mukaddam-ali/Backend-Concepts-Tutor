@@ -15,8 +15,25 @@ def cosine_similarity(a: list[float], b: list[float]) -> float:
     return dot / (norm_a * norm_b)
 
 
+# Below this, a chunk is "closest available" but not actually about the
+# query -- observed empirically with real qwen3-embedding-0.6b embeddings:
+# in-scope questions' top chunks scored 0.6-0.82, while genuinely
+# out-of-scope questions ("What is the capital of France?", "Can you
+# recommend a good pizza recipe?") topped out at 0.3-0.37, a wide, clean
+# gap. Without this cutoff, get_top_chunks always returns *something*
+# (there's always a "nearest" chunk), so generate.py's "no chunks -> I
+# don't know" fallback never fires, and small local models don't reliably
+# follow an instruction to ignore irrelevant context and decline instead
+# of answering from their own general knowledge.
+MIN_SIMILARITY = 0.45
+
+
 def get_top_chunks(query: str, k: int = 3) -> list[dict]:
-    """Return the top-k most similar chunks to the query, each with a similarity score."""
+    """Return the top-k most similar chunks to the query, each with a similarity score.
+
+    Chunks scoring below MIN_SIMILARITY are excluded even if they'd otherwise
+    make the top-k cut -- an irrelevant "closest" chunk is still irrelevant.
+    """
     chunks = db.get_all_chunks()
     if not chunks:
         return []
@@ -28,4 +45,4 @@ def get_top_chunks(query: str, k: int = 3) -> list[dict]:
         for chunk in chunks
     ]
     scored.sort(key=lambda c: c["score"], reverse=True)
-    return scored[:k]
+    return [c for c in scored if c["score"] >= MIN_SIMILARITY][:k]

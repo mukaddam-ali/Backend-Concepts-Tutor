@@ -1,13 +1,24 @@
 """Thin wrapper around Foundry Local: model setup and client access."""
 
 from foundry_local_sdk import Configuration, FoundryLocalManager
+from foundry_local_sdk.exception import FoundryLocalException
 
 EMBEDDING_MODEL_ALIAS = "qwen3-embedding-0.6b"
-# phi-3.5-mini was swapped out: on this machine's CPU-only inference it took
+# phi-3.5-mini was tried first: on this machine's CPU-only inference it took
 # ~55s for even a one-word completion, and the full RAG prompt (retrieved
-# context + a multi-paragraph answer) reliably hit an internal
-# "Operation was cancelled" timeout before finishing. qwen2.5-0.5b answers
-# the same prompts in ~3-10s, comfortably under that limit.
+# context + a multi-paragraph answer) reliably hit an internal "Operation
+# was cancelled" timeout before finishing.
+#
+# qwen2.5-1.5b was tried next -- noticeably better answer quality and
+# succeeded on 22/23 real test questions -- but `foundry status` revealed
+# this machine has only ~1.2 GB RAM free out of 7.3 GB total, and under
+# that pressure qwen2.5-1.5b intermittently hit the same cancellation even
+# on questions that had succeeded moments earlier, in a way 2 retries
+# didn't reliably fix. Reliability matters more than the quality bump here,
+# so settled on qwen2.5-0.5b, which stayed 100% reliable across all 23 real
+# test questions (see TEST_RESULTS.md) despite smaller/shakier answers.
+# If you're running this on a machine with meaningfully more free RAM,
+# qwen2.5-1.5b is worth re-trying for the quality improvement.
 CHAT_MODEL_ALIAS = "qwen2.5-0.5b"
 
 _manager = None
@@ -52,6 +63,22 @@ def embed_one(text: str) -> list[float]:
     return embed([text])[0]
 
 
+# Even well within its typical completion time, this model occasionally hits
+# the same "Operation was cancelled" internal timeout (observed intermittently
+# on a question that succeeded in every other run) -- a transient hiccup, not
+# a consistent failure, so one retry resolves it rather than surfacing an
+# error to the user.
+_CHAT_RETRIES = 2
+
+
 def chat(messages: list[dict]) -> str:
-    completion = get_chat_client().complete_chat(messages)
-    return completion.choices[0].message.content
+    last_error = None
+    for attempt in range(_CHAT_RETRIES + 1):
+        try:
+            completion = get_chat_client().complete_chat(messages)
+            return completion.choices[0].message.content
+        except FoundryLocalException as exc:
+            last_error = exc
+            if "cancelled" not in str(exc).lower():
+                raise
+    raise last_error

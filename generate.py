@@ -11,11 +11,17 @@ Rules:
 - Give a complete, well-developed answer: cover what the concept is, why it \
 matters in practice, and a concrete example or scenario where it applies. \
 Multiple sentences or paragraphs are expected -- avoid one-line answers.
-- Ground your answer in the provided context, but you may use general backend \
-engineering knowledge to explain ideas more clearly, add examples, or connect \
-concepts together.
-- If the context truly does not cover the topic at all, say "I don't have \
-information about that in my knowledge base" rather than guessing.
+- Ground your answer in the provided context. You may use general backend \
+engineering knowledge only to explain or illustrate concepts that ARE covered \
+by the context -- never to answer a question the context doesn't cover.
+- The context you're given always comes from a knowledge-base search and may \
+be irrelevant to the question. If the passages don't actually address what's \
+being asked -- including general-knowledge questions unrelated to backend \
+engineering, and requests unrelated to backend engineering entirely (recipes, \
+trivia, weather, etc.) -- you MUST respond with exactly this sentence and \
+nothing else: "I don't have information about that in my knowledge base." Do \
+not answer from your own training knowledge instead, even if you know the \
+answer.
 - Mention which source document(s) informed your answer, e.g. "(source: caching)".
 """
 
