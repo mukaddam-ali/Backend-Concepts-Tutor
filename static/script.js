@@ -178,8 +178,18 @@ function buildAssistantBubble({ answer, sources, isDemo }, { pending = false } =
     content.appendChild(document.createElement("br"));
   }
 
-  const answerText = document.createElement("span");
-  answerText.textContent = answer.replace(/^\[DEMO MODE.*?\]\n/s, "");
+  const answerText = document.createElement("div");
+  answerText.className = "answer-markdown";
+  const cleanAnswer = answer.replace(/^\[DEMO MODE.*?\]\n/s, "");
+  // Answers are LLM-generated markdown (headings, bold, lists) -- render it
+  // properly instead of showing literal "**" / "##" characters. Sanitized
+  // even though the source is our own local model, not untrusted user
+  // input -- cheap insurance against ever rendering something unexpected.
+  if (window.marked && window.DOMPurify) {
+    answerText.innerHTML = DOMPurify.sanitize(marked.parse(cleanAnswer));
+  } else {
+    answerText.textContent = cleanAnswer;
+  }
   content.appendChild(answerText);
 
   if (sources && sources.length > 0) {
