@@ -33,3 +33,10 @@ else:
 embed = _impl.embed
 embed_one = _impl.embed_one
 chat = _impl.chat
+
+# Optional per-backend override of retrieval.MIN_SIMILARITY -- only
+# demo_backend defines this (its crude hashing embeddings score on a much
+# lower, narrower scale than a real embedding model's). Left unset for
+# foundry_client/gemini_backend, so retrieval.py falls back to its own
+# default.
+MIN_SIMILARITY = getattr(_impl, "MIN_SIMILARITY", None)

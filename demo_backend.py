@@ -23,6 +23,16 @@ DOCS_DIR = Path(__file__).parent / "docs"
 # results before this was bumped up from 256).
 VECTOR_DIM = 8192
 
+# Overrides retrieval.MIN_SIMILARITY, which is calibrated for real embedding
+# models (0.45) -- these hashing vectors score on a much lower, narrower
+# scale (measured: a genuinely in-scope question like "What is CORS?" only
+# scores ~0.27; applying the real-embedding threshold unchanged made this
+# backend wrongly decline almost everything). Set low enough to only filter
+# out true zero-overlap queries (e.g. "capital of France" scores 0.0 here) --
+# chat() below does its own independent keyword-overlap check per passage,
+# which is the actual, already-tested decline mechanism for this backend.
+MIN_SIMILARITY = 0.05
+
 # Excluded from both the embed() vectors and chat()'s keyword-overlap matching.
 # Without this, common words dominate the hashing vector (making cosine
 # similarity nearly meaningless once the corpus has more than a few docs) and
@@ -119,31 +129,26 @@ def embed_one(text: str) -> list[float]:
     return _vectorize(text)
 
 
-def _split_sentences(text: str) -> list[str]:
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    return [s.strip() for s in sentences if s.strip()]
-
-
-def _best_sentence(chunk_content: str, query_tokens: set[str]) -> tuple[str, int]:
-    sentences = _split_sentences(chunk_content)
-    if not sentences:
-        return chunk_content, 0
-
-    scored = [(s, len(query_tokens & _keywords(s))) for s in sentences]
-    return max(scored, key=lambda pair: pair[1])
-
-
 _CONTEXT_RE = re.compile(r"Context:\n(.*?)\n\nQuestion:", re.S)
 _QUESTION_RE = re.compile(r"Question:\s*(.*)", re.S)
 _PASSAGE_RE = re.compile(r"\[source: (.*?)\]\n(.*?)(?=\n\n\[source:|\Z)", re.S)
+
+# How many of the retrieved passages to show in full, ranked by keyword
+# overlap with the question. Showing the whole passage(s) rather than a
+# single cherry-picked sentence gives a much more complete-looking answer
+# on the public demo (which has no real model at all) while staying pure
+# search -- no generation, no LLM, nothing invented.
+_MAX_PASSAGES_SHOWN = 2
 
 
 def chat(messages: list[dict]) -> str:
     """Extractive stand-in for a real chat model.
 
     Parses the same "Context:\\n...\\n\\nQuestion: ..." user message that
-    generate.py builds, and returns the single sentence (from the retrieved
-    passages) with the most keyword overlap with the question.
+    generate.py builds, and returns the full text of the retrieved
+    passage(s) with the most keyword overlap with the question -- verbatim
+    from the knowledge base, never rewritten or summarized, since there's
+    no real model here to do that safely.
     """
     user_message = next((m["content"] for m in reversed(messages) if m["role"] == "user"), "")
 
@@ -159,13 +164,19 @@ def chat(messages: list[dict]) -> str:
     if not passages:
         return "[DEMO MODE] No context passages found."
 
-    best_sentence, best_score = None, -1
-    for _source, content in passages:
-        sentence, score = _best_sentence(content, query_tokens)
-        if score > best_score:
-            best_sentence, best_score = sentence, score
+    scored = [
+        (source, content, len(query_tokens & _keywords(content)))
+        for source, content in passages
+    ]
+    scored.sort(key=lambda triple: triple[2], reverse=True)
 
-    if best_score <= 0:
+    if scored[0][2] <= 0:
         return "I don't have information about that in my knowledge base."
 
-    return f"[DEMO MODE - keyword retrieval only, no real LLM]\n{best_sentence}"
+    shown = [
+        f"**{source}**\n\n{content.strip()}"
+        for source, content, score in scored[:_MAX_PASSAGES_SHOWN]
+        if score > 0
+    ]
+
+    return "[DEMO MODE - keyword retrieval only, no real LLM]\n" + "\n\n---\n\n".join(shown)
