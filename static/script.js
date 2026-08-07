@@ -32,6 +32,10 @@ const newChatBtn = document.getElementById("new-chat-btn");
 const sidebarEl = document.getElementById("sidebar");
 const sidebarToggleBtn = document.getElementById("sidebar-toggle");
 const sidebarOverlayEl = document.getElementById("sidebar-overlay");
+const sourceModalOverlayEl = document.getElementById("source-modal-overlay");
+const sourceModalTitleEl = document.getElementById("source-modal-title");
+const sourceModalBodyEl = document.getElementById("source-modal-body");
+const sourceModalCloseBtn = document.getElementById("source-modal-close");
 
 function loadState() {
   try {
@@ -183,9 +187,11 @@ function buildAssistantBubble({ answer, sources, isDemo }, { pending = false } =
     sourcesEl.className = "sources";
     sourcesEl.appendChild(document.createTextNode("Sources: "));
     sources.forEach((s) => {
-      const chip = document.createElement("span");
+      const chip = document.createElement("button");
+      chip.type = "button";
       chip.className = "source-chip";
       chip.textContent = s;
+      chip.addEventListener("click", () => openSourceModal(s));
       sourcesEl.appendChild(chip);
     });
     content.appendChild(sourcesEl);
@@ -333,6 +339,34 @@ sidebarToggleBtn.addEventListener("click", () => {
   isOpen ? closeMobileSidebar() : openMobileSidebar();
 });
 sidebarOverlayEl.addEventListener("click", closeMobileSidebar);
+
+async function openSourceModal(name) {
+  sourceModalTitleEl.textContent = name;
+  sourceModalBodyEl.textContent = "Loading…";
+  sourceModalOverlayEl.classList.remove("hidden");
+
+  try {
+    const res = await fetch(`/api/source/${encodeURIComponent(name)}`);
+    if (!res.ok) throw new Error(`Server returned ${res.status}`);
+    const data = await res.json();
+    sourceModalBodyEl.textContent = data.content;
+  } catch (err) {
+    sourceModalBodyEl.textContent = "Couldn't load this source document.";
+    console.error(err);
+  }
+}
+
+function closeSourceModal() {
+  sourceModalOverlayEl.classList.add("hidden");
+}
+
+sourceModalCloseBtn.addEventListener("click", closeSourceModal);
+sourceModalOverlayEl.addEventListener("click", (e) => {
+  if (e.target === sourceModalOverlayEl) closeSourceModal();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") closeSourceModal();
+});
 
 async function loadStatus() {
   try {

@@ -6,8 +6,9 @@ interfaces share the exact same retrieval/generation pipeline.
 
 import os
 import threading
+from pathlib import Path
 
-from flask import Flask, jsonify, request, send_from_directory
+from flask import Flask, abort, jsonify, request, send_from_directory
 
 import backend
 import db
@@ -15,6 +16,8 @@ import generate
 import ingest
 
 app = Flask(__name__, static_folder="static", static_url_path="")
+
+DOCS_DIR = Path(__file__).parent / "docs"
 
 _ingestion_lock = threading.Lock()
 
@@ -65,6 +68,18 @@ def chat():
 
     result = generate.answer_query(question)
     return jsonify(result)
+
+
+@app.get("/api/source/<name>")
+def source(name: str):
+    # name comes from a source citation we generated ourselves (a doc_path.stem
+    # from ingest.py), but it's still attacker-controllable input from the
+    # client -- resolve against DOCS_DIR and confirm the result is still
+    # inside it before reading, rather than trusting the filename directly.
+    path = (DOCS_DIR / f"{name}.md").resolve()
+    if DOCS_DIR.resolve() not in path.parents or not path.is_file():
+        abort(404)
+    return jsonify({"name": name, "content": path.read_text(encoding="utf-8")})
 
 
 if __name__ == "__main__":

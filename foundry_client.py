@@ -49,8 +49,19 @@ def get_embedding_client():
     return _get_ready_model(EMBEDDING_MODEL_ALIAS).get_embedding_client()
 
 
+_chat_client = None
+
+
 def get_chat_client():
-    return _get_ready_model(CHAT_MODEL_ALIAS).get_chat_client()
+    global _chat_client
+    if _chat_client is None:
+        _chat_client = _get_ready_model(CHAT_MODEL_ALIAS).get_chat_client()
+        # Left unset, completions default to a short cutoff -- not enough
+        # room for the multi-paragraph, example-driven answers the system
+        # prompt asks for. Cached on the client instance so this only needs
+        # setting once per process, not per call.
+        _chat_client.settings.max_tokens = 1024
+    return _chat_client
 
 
 def embed(texts: list[str]) -> list[list[float]]:

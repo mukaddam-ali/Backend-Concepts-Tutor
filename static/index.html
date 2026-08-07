@@ -124,6 +124,21 @@
     </footer>
   </div>
 
+  <!-- Source viewer modal -->
+  <div id="source-modal-overlay" class="source-modal-overlay hidden">
+    <div class="source-modal">
+      <div class="source-modal-header">
+        <h2 id="source-modal-title">Source</h2>
+        <button id="source-modal-close" class="source-modal-close" aria-label="Close">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-5 h-5">
+            <path d="M18 6 6 18M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div id="source-modal-body" class="source-modal-body"></div>
+    </div>
+  </div>
+
   <script src="script.js"></script>
 </body>
 </html>
