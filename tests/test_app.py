@@ -78,3 +78,24 @@ def test_chat_rejects_missing_body(tmp_path, monkeypatch):
     response = _client().post("/api/chat")
 
     assert response.status_code == 400
+
+
+def test_source_returns_doc_content_for_a_real_source():
+    response = _client().get("/api/source/caching")
+
+    assert response.status_code == 200
+    data = response.get_json()
+    assert data["name"] == "caching"
+    assert "Caching" in data["content"]
+
+
+def test_source_rejects_path_traversal():
+    response = _client().get("/api/source/..%2Fapp")
+
+    assert response.status_code == 404
+
+
+def test_source_rejects_unknown_name():
+    response = _client().get("/api/source/not-a-real-doc")
+
+    assert response.status_code == 404
