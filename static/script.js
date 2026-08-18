@@ -156,8 +156,7 @@ function buildAssistantBubble({ answer, sources, isDemo }, { pending = false } =
 
   const avatar = document.createElement("div");
   avatar.className = "avatar";
-  avatar.innerHTML =
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-3.5 h-3.5"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z"/><path d="M8 12h8M12 8v8"/></svg>';
+  avatar.innerHTML = '<img src="avatar-logo.png" alt="" width="28" height="28">';
   row.appendChild(avatar);
 
   const content = document.createElement("div");
