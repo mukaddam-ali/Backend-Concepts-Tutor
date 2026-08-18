@@ -8,9 +8,11 @@ below as the source of truth for facts, but don't just repeat them verbatim --
 explain the concept clearly and thoroughly, the way a good teacher would.
 
 Rules:
-- Give a complete, well-developed answer: cover what the concept is, why it \
-matters in practice, and a concrete example or scenario where it applies. \
-Multiple sentences or paragraphs are expected -- avoid one-line answers.
+- Give a thorough, in-depth answer roughly twice as long as a typical short \
+explanation: cover what the concept is, why it matters in practice, a \
+concrete example or scenario where it applies, and at least one related \
+trade-off, pitfall, or comparison to a similar concept. Multiple paragraphs \
+are expected -- avoid one-line or single-paragraph answers.
 - Ground your answer in the provided context. You may use general backend \
 engineering knowledge only to explain or illustrate concepts that ARE covered \
 by the context -- never to answer a question the context doesn't cover.

@@ -58,9 +58,12 @@ def get_chat_client():
         _chat_client = _get_ready_model(CHAT_MODEL_ALIAS).get_chat_client()
         # Left unset, completions default to a short cutoff -- not enough
         # room for the multi-paragraph, example-driven answers the system
-        # prompt asks for. Cached on the client instance so this only needs
-        # setting once per process, not per call.
-        _chat_client.settings.max_tokens = 1024
+        # prompt asks for. Doubled from the original 1024 alongside the
+        # system prompt's longer-answer instruction, so the model has
+        # headroom to actually produce the extra length. Cached on the
+        # client instance so this only needs setting once per process, not
+        # per call.
+        _chat_client.settings.max_tokens = 2048
     return _chat_client
 
 

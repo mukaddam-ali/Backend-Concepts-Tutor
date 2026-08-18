@@ -138,7 +138,7 @@ _PASSAGE_RE = re.compile(r"\[source: (.*?)\]\n(.*?)(?=\n\n\[source:|\Z)", re.S)
 # single cherry-picked sentence gives a much more complete-looking answer
 # on the public demo (which has no real model at all) while staying pure
 # search -- no generation, no LLM, nothing invented.
-_MAX_PASSAGES_SHOWN = 2
+_MAX_PASSAGES_SHOWN = 4
 
 
 def chat(messages: list[dict]) -> str:
