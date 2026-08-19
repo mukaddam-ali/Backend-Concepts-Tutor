@@ -64,3 +64,29 @@ def test_chat_handles_unparseable_message():
     messages = [{"role": "user", "content": "no context or question format here"}]
     answer = demo_backend.chat(messages)
     assert "DEMO MODE" in answer
+
+
+def test_chat_declines_when_only_a_generic_word_overlaps():
+    """A single incidental shared word (e.g. "give") used to be enough to
+    skip the decline path entirely -- confirmed live with "give me a cake
+    recipe" matching a load-balancing bullet about "give more powerful
+    servers a larger share" and answering with unrelated content instead of
+    declining."""
+    context = (
+        "[source: load-balancing]\n"
+        "Weighted: give more powerful servers a proportionally larger share of traffic."
+    )
+    messages = _build_messages(context, "give me a cake recipe")
+
+    answer = demo_backend.chat(messages)
+
+    assert "only answer questions about backend engineering" in answer.lower()
+
+
+def test_stem_does_not_mangle_short_words():
+    """"does" (a stopword) used to stem to "doe" *before* the stopword filter
+    ran, so it slipped through as a bogus content word; "cors" used to stem
+    to "cor" the same way. Both are 4 letters, right at the boundary the
+    aggressive "-s" stripping rule used to catch."""
+    assert demo_backend._keywords("does") == set()
+    assert demo_backend._keywords("What is CORS?") == {"cors"}

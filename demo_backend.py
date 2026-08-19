@@ -44,30 +44,43 @@ _STOPWORDS = frozenset(
     of in on at to for with from by as and or but if then so than
     it its it's what who whom which how why when where do does did
     can could will would should may might must not no
+    i me my mine myself we us our ours ourselves you your yours
+    yourself yourselves he him his himself she her hers herself
+    they them their theirs themselves
+    good best better bad worse worst nice great
+    use used using recommend recommended tell told give given
+    get gets got make makes made want wants wanted need needs needed
+    like likes liked know knows knew think thinks thought mean means
+    meant say says said really just also very much many some any
+    today yesterday tomorrow now currently
     """.split()
 )
 
 
 def _stem(token: str) -> str:
     """Crude plural stripping (no real stemmer, no dependencies) so e.g.
-    "websockets" in a doc matches "websocket" in a question."""
+    "websockets" in a doc matches "websocket" in a question.
+
+    Requires len > 4 (not > 3) for the plain "-s" rule specifically to avoid
+    mangling 4-letter acronyms/words like "CORS" -> "cor" or "does" -> "doe"
+    -- both observed corrupting real queries before this was tightened."""
     if len(token) > 4 and token.endswith("ies"):
         return token[:-3] + "y"
     if len(token) > 4 and token.endswith("es") and token[-3] in "sxz":
         return token[:-2]
-    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+    if len(token) > 4 and token.endswith("s") and not token.endswith("ss"):
         return token[:-1]
     return token
 
 
-def _tokenize(text: str) -> list[str]:
-    return [_stem(t) for t in re.findall(r"[a-z0-9]+", text.lower())]
-
-
 def _content_tokens(text: str) -> list[str]:
     """Tokens with stopwords removed, keeping repeats (term frequency matters
-    for the embedding vector, unlike the overlap-counting in chat())."""
-    return [t for t in _tokenize(text) if t not in _STOPWORDS]
+    for the embedding vector, unlike the overlap-counting in chat()).
+
+    Stopwords are filtered on the raw (unstemmed) word, before stemming --
+    stemming first let "does" (a stopword) mangle into "doe" and slip past
+    the filter as a bogus content word, since "doe" isn't itself listed."""
+    return [_stem(t) for t in re.findall(r"[a-z0-9]+", text.lower()) if t not in _STOPWORDS]
 
 
 def _keywords(text: str) -> set[str]:
@@ -164,13 +177,45 @@ def chat(messages: list[dict]) -> str:
     if not passages:
         return "[DEMO MODE] No context passages found."
 
-    scored = [
-        (source, content, len(query_tokens & _keywords(content)))
-        for source, content in passages
-    ]
+    # A single incidental shared word used to be enough to count as "overlap"
+    # and skip the decline path -- confirmed as the cause of the demo backend
+    # answering off-topic questions (e.g. "give" in both "give me a cake
+    # recipe" and a load-balancing bullet about "give more powerful servers
+    # a larger share", or generic filler like "today" in "what's the weather
+    # today" matching an unrelated doc that happens to say "today's
+    # applications..."). A plain word-count ratio doesn't fix this: it treats
+    # a match on "today" (appears in several docs, near-meaningless) the same
+    # as a match on "cors" (appears in essentially one doc, highly specific).
+    # Weighting each matched word by its IDF -- already computed for the
+    # embedding step, for exactly this reason -- means specific/rare matches
+    # count heavily and generic ones barely move the score.
+    if not query_tokens:
+        return "I only answer questions about backend engineering -- ask me something about that instead."
+
+    idf = _get_idf()
+
+    def overlap_ratio(content: str) -> float:
+        matched = query_tokens & _keywords(content)
+        total_weight = sum(idf.get(t, 1.0) for t in query_tokens)
+        matched_weight = sum(idf.get(t, 1.0) for t in matched)
+        return matched_weight / total_weight
+
+    scored = [(source, content, overlap_ratio(content)) for source, content in passages]
     scored.sort(key=lambda triple: triple[2], reverse=True)
 
-    if scored[0][2] <= 0:
+    # Calibrated against the real 20 in-scope / 6 out-of-scope question set
+    # this project already tests with (see TEST_RESULTS.md): in-scope scores
+    # ranged 0.518-1.000, out-of-scope 0.000-0.794, so 0.5 is the cleanest
+    # single cutoff available -- not a perfect split. IDF can't tell "rare
+    # because topic-specific" apart from "rare because a generic word
+    # happened to only appear once in an unrelated doc", so a question like
+    # "what's the best programming language" can still slip through if the
+    # one doc mentioning "language" (in "language model") makes it look
+    # falsely specific. A known, explainable limitation of a corpus-frequency
+    # heuristic, not fixable by threshold-tuning alone -- the real backends
+    # (Foundry Local, Gemini) don't have this problem at all.
+    MIN_OVERLAP_RATIO = 0.5
+    if scored[0][2] < MIN_OVERLAP_RATIO:
         return "I only answer questions about backend engineering -- ask me something about that instead."
 
     shown = [
