@@ -57,7 +57,7 @@ def test_chat_returns_dont_know_when_no_overlap():
 
     answer = demo_backend.chat(messages)
 
-    assert "don't have information" in answer.lower()
+    assert "only answer questions about backend engineering" in answer.lower()
 
 
 def test_chat_handles_unparseable_message():

@@ -171,7 +171,7 @@ def chat(messages: list[dict]) -> str:
     scored.sort(key=lambda triple: triple[2], reverse=True)
 
     if scored[0][2] <= 0:
-        return "I don't have information about that in my knowledge base."
+        return "I only answer questions about backend engineering -- ask me something about that instead."
 
     shown = [
         f"**{source}**\n\n{content.strip()}"

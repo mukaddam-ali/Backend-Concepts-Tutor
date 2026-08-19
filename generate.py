@@ -21,11 +21,15 @@ be irrelevant to the question. If the passages don't actually address what's \
 being asked -- including general-knowledge questions unrelated to backend \
 engineering, and requests unrelated to backend engineering entirely (recipes, \
 trivia, weather, etc.) -- you MUST respond with exactly this sentence and \
-nothing else: "I don't have information about that in my knowledge base." Do \
-not answer from your own training knowledge instead, even if you know the \
-answer.
+nothing else: "I only answer questions about backend engineering -- ask me \
+something about that instead." Do not answer from your own training \
+knowledge instead, even if you know the answer.
 - Mention which source document(s) informed your answer, e.g. "(source: caching)".
 """
+
+# Kept in sync with demo_backend.py's own decline string (duplicated rather
+# than imported to avoid a circular import: generate -> backend -> demo_backend).
+DECLINE_MESSAGE = "I only answer questions about backend engineering -- ask me something about that instead."
 
 
 def build_context_block(chunks: list[dict]) -> str:
@@ -39,7 +43,7 @@ def answer_query(question: str, k: int = 4) -> dict:
 
     if not top_chunks:
         return {
-            "answer": "I don't have information about that in my knowledge base.",
+            "answer": DECLINE_MESSAGE,
             "sources": [],
         }
 
@@ -53,7 +57,7 @@ def answer_query(question: str, k: int = 4) -> dict:
     ]
 
     answer_text = backend.chat(messages)
-    answered_from_context = "don't have information" not in answer_text.lower()
+    answered_from_context = "only answer questions about backend engineering" not in answer_text.lower()
 
     return {
         "answer": answer_text,

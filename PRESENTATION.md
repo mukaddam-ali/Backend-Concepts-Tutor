@@ -54,7 +54,8 @@ Ask, in order:
 3. **An out-of-scope question** — the "doesn't hallucinate" moment:
    > What is the capital of France?
 
-   Expect: "I don't have information about that in my knowledge base."
+   Expect: "I only answer questions about backend engineering -- ask me
+   something about that instead."
    *(Note: this specific fallback is proven reliable on the real model's
    language understanding; see TEST_RESULTS.md if presenting in demo mode,
    where 2 of 3 out-of-scope test questions triggered false positives — pick

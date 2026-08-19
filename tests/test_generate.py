@@ -41,7 +41,7 @@ def test_answer_query_hides_sources_when_answer_unknown(tmp_path, monkeypatch):
 
     result = generate.answer_query("What is the capital of France?")
 
-    assert "don't have information" in result["answer"].lower()
+    assert "only answer questions about backend engineering" in result["answer"].lower()
     assert result["sources"] == []
 
 
@@ -53,4 +53,4 @@ def test_answer_query_empty_db_returns_no_sources(tmp_path, monkeypatch):
     result = generate.answer_query("anything")
 
     assert result["sources"] == []
-    assert "don't have information" in result["answer"].lower()
+    assert "only answer questions about backend engineering" in result["answer"].lower()
